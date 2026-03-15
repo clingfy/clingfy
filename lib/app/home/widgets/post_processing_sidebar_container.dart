@@ -1,0 +1,119 @@
+import 'package:clingfy/core/devices/device_controller.dart';
+import 'package:clingfy/app/home/post_processing/post_processing_controller.dart';
+import 'package:clingfy/app/home/recording/recording_controller.dart';
+import 'package:clingfy/app/home/post_processing/widgets/post_processing_sidebar.dart';
+import 'package:clingfy/app/settings/settings_controller.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+class PostProcessingSidebarContainer extends StatelessWidget {
+  const PostProcessingSidebarContainer({
+    super.key,
+    required this.settingsController,
+    required this.isRecording,
+  });
+
+  final SettingsController settingsController;
+  final bool isRecording;
+
+  @override
+  Widget build(BuildContext context) {
+    final canInteractWithPreview = context.select<RecordingController, bool>(
+      (r) => r.canInteractWithPreview,
+    );
+    final postHasError = context.select<PostProcessingController, bool>(
+      (p) => p.hasError,
+    );
+    final postEditingLocked = context.select<PostProcessingController, bool>(
+      (p) => p.isEditingLocked,
+    );
+    final canEditPost =
+        canInteractWithPreview &&
+        !isRecording &&
+        !postHasError &&
+        !postEditingLocked;
+
+    return Selector<
+      PostProcessingController,
+      ({
+        bool isEditingLocked,
+        double padding,
+        double radius,
+        int? bg,
+        String? img,
+        bool showCursor,
+        bool cursorAvailable,
+        double cursorSize,
+        double zoom,
+        double gain,
+        double volume,
+      })
+    >(
+      selector: (_, p) => (
+        isEditingLocked: p.isEditingLocked,
+        padding: p.padding,
+        radius: p.radius,
+        bg: p.backgroundColor,
+        img: p.backgroundImagePath,
+        showCursor: p.showCursor,
+        cursorAvailable: p.cursorAvailable,
+        cursorSize: p.cursorSize,
+        zoom: p.zoomFactor,
+        gain: p.audioGainDb,
+        volume: p.audioVolumePercent,
+      ),
+      builder: (context, vm, _) {
+        final post = context.read<PostProcessingController>();
+        final hasAudio = context.select<DeviceController, bool>(
+          (d) => d.selectedAudioSourceId != DeviceController.noAudioId,
+        );
+
+        return PostProcessingSidebar(
+          enabled: canEditPost,
+          isProcessing: vm.isEditingLocked,
+          cursorAvailable: vm.cursorAvailable,
+          hasAudio: hasAudio,
+          layoutPreset: settingsController.post.layoutPreset,
+          resolutionPreset: settingsController.post.resolutionPreset,
+          fitMode: settingsController.post.fitMode,
+          padding: vm.padding,
+          radius: vm.radius,
+          backgroundColor: vm.bg,
+          backgroundImagePath: vm.img,
+          showCursor: vm.showCursor,
+          cursorSize: vm.cursorSize,
+          zoomFactor: vm.zoom,
+          audioGainDb: vm.gain,
+          audioVolume: vm.volume,
+          autoNormalizeOnExport:
+              settingsController.post.postAutoNormalizeEnabled,
+          autoNormalizeTargetDbfs:
+              settingsController.post.postTargetLoudnessDbfs,
+          onPaddingChanged: post.setPadding,
+          onPaddingChangeEnd: (_) => post.applyProcessing(),
+          onRadiusChanged: post.setRadius,
+          onRadiusChangeEnd: (_) => post.applyProcessing(),
+          onBackgroundColorChanged: post.setBackgroundColor,
+          onBackgroundImageChanged: post.setBackgroundImagePath,
+          onCursorShowChanged: post.setShowCursor,
+          onCursorSizeChanged: post.setCursorSize,
+          onCursorSizeChangeEnd: (_) => post.applyProcessing(),
+          onZoomFactorChanged: post.setZoomFactor,
+          onZoomFactorChangeEnd: (_) => post.applyProcessing(),
+          onAudioGainChanged: post.setAudioGainDb,
+          onAudioGainChangeEnd: post.setAudioGainDbEnd,
+          onAudioVolumeChanged: post.setAudioVolumePercent,
+          onAudioVolumeChangeEnd: post.setAudioVolumePercentEnd,
+          onAutoNormalizeOnExportChanged:
+              settingsController.post.updatePostAutoNormalizeEnabled,
+          onAutoNormalizeTargetDbfsChanged:
+              settingsController.post.updatePostTargetLoudnessDbfs,
+          onPickImage: post.pickImage,
+          onLayoutPresetChanged: post.setLayoutPreset,
+          onResolutionPresetChanged: post.setResolutionPreset,
+          onFitModeChanged: post.setFitMode,
+        );
+      },
+    );
+  }
+}

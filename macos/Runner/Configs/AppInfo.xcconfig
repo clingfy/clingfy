@@ -1,0 +1,11 @@
+// AppInfo.xcconfig
+// Application-level settings for the Runner target.
+//
+// The application's name. By default this is also the title of the Flutter window.
+PRODUCT_NAME = Clingfy
+
+// The application's bundle identifier
+PRODUCT_BUNDLE_IDENTIFIER = com.clingfy.clingfy
+
+// The copyright displayed in application information
+PRODUCT_COPYRIGHT = Copyright © 2026 com.clingfy. All rights reserved.

@@ -1,0 +1,24 @@
+import Foundation
+
+enum PrefKey {
+  static let quality = "pref.recordingQuality"
+  static let audioDeviceId = "pref.audioDeviceId"
+  static let videoDeviceId = "pref.videoDeviceId"
+  static let overlayEnabled = "pref.overlayEnabled"
+  static let overlayLinked = "pref.overlayLinked"
+  static let overlayShapeId = "pref.overlayShapeId"
+  static let overlaySize = "pref.overlaySize"
+  static let cursorEnabled = "pref.cursorEnabled"
+  static let cursorLinked = "pref.cursorLinked"
+  static let displayMode = "pref.displayTargetMode"
+  static let displayId = "pref.selectedDisplayID"
+  static let appWindowId = "pref.selectedAppWindowID"
+  static let fileTemplate = "pref.fileNameTemplate"
+  static let indicatorPinned = "pref.indicatorPinned"
+  static let areaDisplayId = "pref.areaDisplayId"
+  static let areaRect = "pref.areaRect"
+  static let saveFolderBookmark = "saveFolderBookmark"
+  static let keepOriginals = "pref.keepOriginals"
+  static let excludeRecorderApp = "pref.excludeRecorderApp"
+  static let excludeMicFromSystemAudio = "pref.excludeMicFromSystemAudio"
+}

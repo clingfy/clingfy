@@ -1,0 +1,29 @@
+/* Menu Bar Controller */
+"Start Recording" = "Start Recording";
+"Stop Recording" = "Stop Recording";
+"Open Clingfy" = "Open Clingfy";
+"Quit Clingfy" = "Quit Clingfy";
+
+/* Pre-Recording Bar */
+"Display" = "Display";
+"Window" = "Window";
+"Area" = "Area";
+"Camera" = "Camera";
+"Mic" = "Mic";
+"System" = "System";
+"Update" = "Update";
+"Stop recording" = "Stop recording";
+"Start recording" = "Start recording";
+"No camera" = "No camera";
+"Unknown Camera" = "Unknown Camera";
+
+/* Recording Indicator */
+"Stopping..." = "Stopping...";
+
+/* Export */
+"Export cancelled" = "Export cancelled";
+"Export failed" = "Export failed";
+
+/* Display Service */
+"Screen %d" = "Screen %d";
+"App" = "App";

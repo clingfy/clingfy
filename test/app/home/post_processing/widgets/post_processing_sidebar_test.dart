@@ -1,0 +1,271 @@
+import 'dart:io';
+
+import 'package:clingfy/l10n/app_localizations.dart';
+import 'package:clingfy/core/models/app_models.dart';
+import 'package:clingfy/ui/platform/widgets/app_icon_button.dart';
+import 'package:clingfy/ui/platform/widgets/app_inline_notice.dart';
+import 'package:clingfy/ui/platform/widgets/app_section.dart';
+import 'package:clingfy/ui/platform/widgets/app_slider.dart';
+import 'package:clingfy/ui/platform/widgets/app_slider_row.dart';
+import 'package:clingfy/ui/platform/widgets/app_toggle_row.dart';
+import 'package:clingfy/app/home/post_processing/widgets/post_processing_sidebar.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:macos_ui/macos_ui.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  Widget buildTestApp({
+    bool enabled = true,
+    bool cursorAvailable = true,
+    bool hasAudio = true,
+    bool showCursor = true,
+    double zoomFactor = 1.0,
+    bool autoNormalizeOnExport = false,
+    String? backgroundImagePath,
+    void Function(double)? onZoomFactorChanged,
+    void Function(double)? onZoomFactorChangeEnd,
+    void Function(String?)? onBackgroundImageChanged,
+  }) {
+    return MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: MacosTheme(
+        data: MacosThemeData.light(),
+        child: Scaffold(
+          body: PostProcessingSidebar(
+            isProcessing: false,
+            enabled: enabled,
+            layoutPreset: LayoutPreset.auto,
+            resolutionPreset: ResolutionPreset.auto,
+            fitMode: FitMode.fit,
+            padding: 8,
+            radius: 4,
+            backgroundColor: 0xFFFFFFFF,
+            backgroundImagePath: backgroundImagePath,
+            showCursor: showCursor,
+            cursorSize: 1.0,
+            zoomFactor: zoomFactor,
+            cursorAvailable: cursorAvailable,
+            hasAudio: hasAudio,
+            disabledMessage: null,
+            audioGainDb: 0,
+            audioVolume: 50,
+            autoNormalizeOnExport: autoNormalizeOnExport,
+            autoNormalizeTargetDbfs: -14,
+            onLayoutPresetChanged: (_) {},
+            onResolutionPresetChanged: (_) {},
+            onFitModeChanged: (_) {},
+            onPaddingChanged: (_) {},
+            onPaddingChangeEnd: (_) {},
+            onRadiusChanged: (_) {},
+            onRadiusChangeEnd: (_) {},
+            onBackgroundColorChanged: (_) {},
+            onBackgroundImageChanged: onBackgroundImageChanged ?? (_) {},
+            onCursorShowChanged: (_) {},
+            onCursorSizeChanged: (_) {},
+            onCursorSizeChangeEnd: (_) {},
+            onZoomFactorChanged: onZoomFactorChanged ?? (_) {},
+            onZoomFactorChangeEnd: onZoomFactorChangeEnd ?? (_) {},
+            onPickImage: () async => null,
+            onAudioGainChanged: (_) {},
+            onAudioGainChangeEnd: (_) {},
+            onAudioVolumeChanged: (_) {},
+            onAudioVolumeChangeEnd: (_) {},
+            onAutoNormalizeOnExportChanged: (_) {},
+            onAutoNormalizeTargetDbfsChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+  }
+
+  testWidgets('renders rail tabs and switches tab content', (tester) async {
+    await tester.pumpWidget(buildTestApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Layout'), findsWidgets);
+    expect(find.text('Effects'), findsWidgets);
+    expect(find.text('Export'), findsWidgets);
+    expect(find.text('Layout Settings'), findsOneWidget);
+
+    await tester.tap(find.text('Effects').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Effects Settings'), findsOneWidget);
+
+    await tester.tap(find.text('Export').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Export Settings'), findsOneWidget);
+  });
+
+  testWidgets('layout tab uses app section and slider primitives', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTestApp());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppSection), findsWidgets);
+    expect(find.byType(AppSliderRow), findsNWidgets(2));
+    expect(find.byType(AppSlider), findsNWidgets(2));
+    expect(find.text('Pick an image'), findsOneWidget);
+    expect(find.text('More colors'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget.runtimeType.toString() == 'SectionCard',
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('background image preview uses app icon button clear action', (
+    tester,
+  ) async {
+    final cleared = <String?>[];
+    final imagePath =
+        '${Directory.current.path}/assets/images/app-banner-macos.png';
+
+    expect(File(imagePath).existsSync(), isTrue);
+
+    await tester.pumpWidget(
+      buildTestApp(
+        backgroundImagePath: imagePath,
+        onBackgroundImageChanged: cleared.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppIconButton), findsOneWidget);
+    expect(find.text('app-banner-macos.png'), findsWidgets);
+
+    final clearButton = tester.widget<AppIconButton>(
+      find.byType(AppIconButton),
+    );
+    clearButton.onPressed?.call();
+
+    expect(cleared, [null]);
+  });
+
+  testWidgets('effects tab shows standardized notices when data is missing', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTestApp(cursorAvailable: false, hasAudio: false, showCursor: true),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Effects').first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppInlineNotice), findsNWidgets(2));
+    expect(find.text('Cursor data missing'), findsOneWidget);
+    expect(find.text('No mic audio track found'), findsOneWidget);
+  });
+
+  testWidgets('export tab only shows normalization controls', (tester) async {
+    await tester.pumpWidget(buildTestApp(autoNormalizeOnExport: false));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Export').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Format'), findsNothing);
+    expect(find.text('Codec'), findsNothing);
+    expect(find.text('Bitrate'), findsNothing);
+    expect(find.text('Auto-normalize on export'), findsOneWidget);
+    expect(find.text('Target loudness'), findsNothing);
+
+    await tester.pumpWidget(buildTestApp(autoNormalizeOnExport: true));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Export').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Format'), findsNothing);
+    expect(find.text('Codec'), findsNothing);
+    expect(find.text('Bitrate'), findsNothing);
+    expect(find.text('Target loudness'), findsOneWidget);
+  });
+
+  testWidgets('zoom toggle preserves enable/disable callback behavior', (
+    tester,
+  ) async {
+    final changed = <double>[];
+    final ended = <double>[];
+
+    await tester.pumpWidget(
+      buildTestApp(
+        zoomFactor: 1.0,
+        onZoomFactorChanged: changed.add,
+        onZoomFactorChangeEnd: ended.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Effects').first);
+    await tester.pumpAndSettle();
+
+    final toggleRows = find.byType(AppToggleRow);
+    expect(toggleRows, findsNWidgets(2));
+
+    final zoomToggle = tester.widget<AppToggleRow>(toggleRows.at(1));
+    zoomToggle.onChanged?.call(true);
+
+    expect(changed.last, 1.5);
+    expect(ended.last, 1.5);
+
+    changed.clear();
+    ended.clear();
+
+    await tester.pumpWidget(
+      buildTestApp(
+        zoomFactor: 2.0,
+        onZoomFactorChanged: changed.add,
+        onZoomFactorChangeEnd: ended.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Effects').first);
+    await tester.pumpAndSettle();
+
+    final zoomToggleEnabled = tester.widget<AppToggleRow>(
+      find.byType(AppToggleRow).at(1),
+    );
+    zoomToggleEnabled.onChanged?.call(false);
+
+    expect(changed.last, 1.0);
+    expect(ended.last, 1.0);
+  });
+
+  testWidgets('disabled state keeps content interaction blocked', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTestApp(enabled: false));
+    await tester.pumpAndSettle();
+
+    final dimmedOpacity = find.byWidgetPredicate(
+      (widget) => widget is Opacity && (widget.opacity - 0.45).abs() < 0.0001,
+    );
+    final blockedIgnorePointer = find.byWidgetPredicate(
+      (widget) => widget is IgnorePointer && widget.ignoring,
+    );
+
+    expect(dimmedOpacity, findsOneWidget);
+    expect(blockedIgnorePointer, findsOneWidget);
+  });
+
+  testWidgets('background color picker dialog opens without overflow', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('More colors'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ColorPicker), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}

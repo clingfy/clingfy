@@ -1,0 +1,29 @@
+/* Menu Bar Controller */
+"Start Recording" = "Începe Înregistrarea";
+"Stop Recording" = "Oprește Înregistrarea";
+"Open Clingfy" = "Deschide Clingfy";
+"Quit Clingfy" = "Închide Clingfy";
+
+/* Pre-Recording Bar */
+"Display" = "Ecran";
+"Window" = "Fereastră";
+"Area" = "Zonă";
+"Camera" = "Cameră";
+"Mic" = "Microfon";
+"System" = "Sistem";
+"Update" = "Actualizare";
+"Stop recording" = "Oprește înregistrarea";
+"Start recording" = "Începe înregistrarea";
+"No camera" = "Fără cameră";
+"Unknown Camera" = "Cameră necunoscută";
+
+/* Recording Indicator */
+"Stopping..." = "Se oprește...";
+
+/* Export */
+"Export cancelled" = "Export anulat";
+"Export failed" = "Export eșuat";
+
+/* Display Service */
+"Screen %d" = "Ecran %d";
+"App" = "Aplicație";

@@ -1,0 +1,29 @@
+/* Menu Bar Controller */
+"Start Recording" = "بدء التسجيل";
+"Stop Recording" = "إيقاف التسجيل";
+"Open Clingfy" = "فتح Clingfy";
+"Quit Clingfy" = "إنهاء Clingfy";
+
+/* Pre-Recording Bar */
+"Display" = "العرض";
+"Window" = "النافذة";
+"Area" = "المنطقة";
+"Camera" = "الكاميرا";
+"Mic" = "الميكروفون";
+"System" = "النظام";
+"Update" = "تحديث";
+"Stop recording" = "إيقاف التسجيل";
+"Start recording" = "بدء التسجيل";
+"No camera" = "بدون كاميرا";
+"Unknown Camera" = "كاميرا غير معروفة";
+
+/* Recording Indicator */
+"Stopping..." = "جاري الإيقاف...";
+
+/* Export */
+"Export cancelled" = "تم إلغاء التصدير";
+"Export failed" = "فشل التصدير";
+
+/* Display Service */
+"Screen %d" = "شاشة %d";
+"App" = "تطبيق";
