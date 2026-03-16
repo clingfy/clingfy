@@ -44,32 +44,37 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Checking project.pbxproj..."
+          echo "APP_ENV=$APP_ENV"
+
+          echo "1) project.pbxproj"
           test -f macos/Runner.xcodeproj/project.pbxproj
+          echo "OK"
 
-          echo "Checking workspace..."
+          echo "2) workspace"
           test -f macos/Runner.xcworkspace/contents.xcworkspacedata
+          echo "OK"
 
-          echo "Checking scheme file for APP_ENV=$APP_ENV..."
+          echo "3) xcschemes dir"
           ls -la macos/Runner.xcodeproj/xcshareddata || true
           ls -la macos/Runner.xcodeproj/xcshareddata/xcschemes || true
-          test -f "macos/Runner.xcodeproj/xcshareddata/xcschemes/${APP_ENV}.xcscheme"
 
-          echo "Checking build configurations..."
+          echo "4) scheme file"
+          test -f "macos/Runner.xcodeproj/xcshareddata/xcschemes/${APP_ENV}.xcscheme"
+          echo "OK"
+
+          echo "5) build configs"
           grep -n "Debug-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
           grep -n "Profile-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
           grep -n "Release-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
-
-      - name: Install CocoaPods
-        run: |
-          set -euo pipefail
-          cd macos
-          pod install --repo-update
-          xcodebuild -list -workspace Runner.xcworkspace
-
+          echo "OK"
+      
       - name: Generate Flutter macOS configs
         run: |
           set -euo pipefail
+          
+          # Repair scaffolding if needed (from our previous fix)
+          flutter create --platforms=macos .
+          
           flutter build macos \
             --debug \
             --config-only \
@@ -77,6 +82,18 @@ jobs:
             --build-name "$APP_VERSION" \
             --build-number "$BUILD_NUMBER" \
             --dart-define=APP_ENV=$APP_ENV
+
+          # Re-adding the dummy files from earlier to prevent Xcode build planner crashes
+          echo "Creating empty xcfilelist files..."
+          mkdir -p macos/Flutter/ephemeral
+          touch macos/Flutter/ephemeral/FlutterInputs.xcfilelist
+          touch macos/Flutter/ephemeral/FlutterOutputs.xcfilelist
+
+      - name: Install CocoaPods
+        run: |
+          set -euo pipefail
+          cd macos
+          pod install --repo-update
 
       - name: Compile macOS app (unsigned validation build)
         run: |
