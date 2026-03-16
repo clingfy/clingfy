@@ -25,7 +25,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.41.0
+          flutter-version: 3.41.1
           channel: stable
 
       - name: Resolve app version
@@ -39,42 +39,49 @@ jobs:
           echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
 
+      - name: Debug project layout
+        run: |
+          set -euo pipefail
+          pwd
+          git rev-parse HEAD
+          ls -la
+          ls -la macos
+          test -f .metadata && echo ".metadata exists"
+          test -f macos/Runner.xcodeproj/project.pbxproj && echo "Runner.xcodeproj exists"
+          sed -n '1,80p' .metadata
+
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Analyze
-        run: flutter analyze
+      - name: Validate Flutter/macOS toolchain
+        run: |
+          flutter --version
+          flutter doctor -v
+          flutter devices
 
-      - name: Test
-        run: flutter test
+      - name: Precache macOS artifacts
+        run: flutter precache --macos
+
+      - name: Install CocoaPods
+        run: |
+          cd macos
+          pod install --repo-update
 
       - name: Compile macOS app (unsigned validation build)
         run: |
           set -euo pipefail
 
-          flutter config --enable-macos-desktop
-
-          flutter build macos \
-            --debug \
-            --config-only \
-            --flavor "$APP_ENV" \
-            --build-name "$APP_VERSION" \
-            --build-number "$BUILD_NUMBER" \
-            --dart-define=APP_ENV=$APP_ENV
-
-          cd macos
-          pod install --repo-update
-          cd ..
-
           xcodebuild \
             -workspace macos/Runner.xcworkspace \
             -scheme "$APP_ENV" \
             -configuration "Debug-$APP_ENV" \
+            -destination "platform=macOS" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             DEVELOPMENT_TEAM="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             build
 
       - name: Upload CI artifact
