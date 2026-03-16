@@ -43,12 +43,22 @@ jobs:
       - name: Verify macOS host project files
         run: |
           set -euo pipefail
+
+          echo "Checking project.pbxproj..."
           test -f macos/Runner.xcodeproj/project.pbxproj
+
+          echo "Checking workspace..."
           test -f macos/Runner.xcworkspace/contents.xcworkspacedata
-          test -f macos/Runner.xcodeproj/xcshareddata/xcschemes/${APP_ENV}.xcscheme
-          grep -q "Debug-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
-          grep -q "Profile-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
-          grep -q "Release-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
+
+          echo "Checking scheme file for APP_ENV=$APP_ENV..."
+          ls -la macos/Runner.xcodeproj/xcshareddata || true
+          ls -la macos/Runner.xcodeproj/xcshareddata/xcschemes || true
+          test -f "macos/Runner.xcodeproj/xcshareddata/xcschemes/${APP_ENV}.xcscheme"
+
+          echo "Checking build configurations..."
+          grep -n "Debug-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
+          grep -n "Profile-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
+          grep -n "Release-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
 
       - name: Install CocoaPods
         run: |
