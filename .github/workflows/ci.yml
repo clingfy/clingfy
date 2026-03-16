@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    env:
+      APP_ENV: ${{ github.base_ref == 'develop' && 'dev' || 'prod' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Xcode and Swift
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.1
+          channel: stable
+
+      - name: Resolve app version
+        run: |
+          set -euo pipefail
+          VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}')"
+          APP_VERSION="${VERSION_LINE%%+*}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Generate Flutter macOS configs
+        run: |
+          set -euo pipefail
+          
+          # Repair scaffolding if needed (from our previous fix)
+          flutter create --platforms=macos .
+          
+          flutter build macos \
+            --debug \
+            --config-only \
+            --flavor "$APP_ENV" \
+            --build-name "$APP_VERSION" \
+            --build-number "$BUILD_NUMBER" \
+            --dart-define=APP_ENV=$APP_ENV
+
+          # Re-adding the dummy files from earlier to prevent Xcode build planner crashes
+          echo "Creating empty xcfilelist files..."
+          mkdir -p macos/Flutter/ephemeral
+          touch macos/Flutter/ephemeral/FlutterInputs.xcfilelist
+          touch macos/Flutter/ephemeral/FlutterOutputs.xcfilelist
+
+      - name: Install CocoaPods
+        run: |
+          set -euo pipefail
+          cd macos
+          pod install --repo-update
+
+      - name: Verify macOS host project files
+        run: |
+          set -euo pipefail
+
+          echo "APP_ENV=$APP_ENV"
+
+          echo "1) project.pbxproj"
+          test -f macos/Runner.xcodeproj/project.pbxproj
+          echo "OK"
+
+          echo "2) workspace"
+          test -f macos/Runner.xcworkspace/contents.xcworkspacedata
+          echo "OK"
+
+          echo "3) xcschemes dir"
+          ls -la macos/Runner.xcodeproj/xcshareddata || true
+          ls -la macos/Runner.xcodeproj/xcshareddata/xcschemes || true
+
+          echo "4) scheme file"
+          test -f "macos/Runner.xcodeproj/xcshareddata/xcschemes/${APP_ENV}.xcscheme"
+          echo "OK"
+
+          echo "5) build configs"
+          grep -n "Debug-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
+          grep -n "Profile-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
+          grep -n "Release-${APP_ENV}" macos/Runner.xcodeproj/project.pbxproj
+          echo "OK"
+
+      - name: Compile macOS app (unsigned validation build)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace macos/Runner.xcworkspace \
+            -scheme "$APP_ENV" \
+            -configuration "Debug-$APP_ENV" \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clingfy-CI
+          path: build/macos
