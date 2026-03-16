@@ -34,10 +34,11 @@ jobs:
           VERSION_LINE="$(grep '^version:' pubspec.yaml | awk '{print $2}')"
           APP_VERSION="${VERSION_LINE%%+*}"
           BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-
-          echo "Resolved version: ${APP_VERSION}+${BUILD_NUMBER}"
           echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Flutter pub get
+        run: flutter pub get
 
       - name: Debug project layout
         run: |
@@ -50,27 +51,22 @@ jobs:
           test -f macos/Runner.xcodeproj/project.pbxproj && echo "Runner.xcodeproj exists"
           sed -n '1,80p' .metadata
 
-      - name: Flutter pub get
-        run: flutter pub get
-
       - name: Validate Flutter/macOS toolchain
         run: |
           flutter --version
           flutter doctor -v
           flutter devices
-
-      - name: Precache macOS artifacts
-        run: flutter precache --macos
+          flutter precache --macos
 
       - name: Install CocoaPods
         run: |
           cd macos
           pod install --repo-update
-
+          cd ..
+          
       - name: Compile macOS app (unsigned validation build)
         run: |
           set -euo pipefail
-
           xcodebuild \
             -workspace macos/Runner.xcworkspace \
             -scheme "$APP_ENV" \
