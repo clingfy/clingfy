@@ -19,6 +19,8 @@ Fill this section before starting verification.
 - Date: `YYYY-MM-DD`
 - Verified by: `Name`
 - Commit: `TBD`
+- Tag: `vT.B.D`
+- Build: `Azure #255` or `GitHub Actions #4`
 - Status: `In progress`
 
 Possible status values:
@@ -138,7 +140,6 @@ Verify licensing and paywall behavior.
 * [ ] free trial depletion
 * [ ] paywall display
 * [ ] license activation
-* [ ] device deactivation
 * [ ] expired updates messaging
 
 Notes:
