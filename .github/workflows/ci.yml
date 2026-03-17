@@ -1,13 +1,15 @@
-name: Build_Pipeline
+name: CI
 
 on:
   pull_request:
     branches:
       - develop
       - main
+      - 'release/*'
 
 jobs:
   build:
+    name: macOS CI
     runs-on: macos-latest
 
     env:
