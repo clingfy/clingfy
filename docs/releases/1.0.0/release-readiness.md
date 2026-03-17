@@ -16,10 +16,12 @@ Fill this section before starting verification.
 
 - Version: `1.0.0`
 - Channel: `prod`
-- Date: `2026-03-15`
+- Date: `2026-03-18`
 - Verified by: `Nabil`
-- Commit: `TBD`
-- Status: `In progress`
+- Commit: `fcd7f6ed019fa1c1c12b2edb11bafdb750a9eeb0`
+- Tag: `v1.0.0`
+- Build: `Azure #255` or `GitHub Actions #4`
+- Status: `Approved`
 
 Possible status values:
 
@@ -138,7 +140,6 @@ Verify licensing and paywall behavior.
 * [x] free trial depletion
 * [x] paywall display
 * [x] license activation
-* [x] device deactivation
 * [x] expired updates messaging
 
 Notes:
