@@ -114,10 +114,10 @@ configure_azure_defaults() {
       ;;
     dev)
       export AZ_CONTAINER="${AZ_CONTAINER:-updates}"
-      export AZ_BINARIES_FOLDER="${AZ_BINARIES_FOLDER:-dev/downloads}"
-      export AZ_SYMBOLS_BLOB_PREFIX="dev/"
-      export APPCAST_BLOB_PATH="dev/appcast.xml"
-      export FEED_PATH="dev/appcast.xml"
+      export AZ_BINARIES_FOLDER="${AZ_BINARIES_FOLDER:-downloads}"
+      export AZ_SYMBOLS_BLOB_PREFIX=""
+      export APPCAST_BLOB_PATH="appcast.xml"
+      export FEED_PATH="appcast.xml"
       ;;
     *)
       export AZ_CONTAINER="${AZ_CONTAINER:-updates}"
