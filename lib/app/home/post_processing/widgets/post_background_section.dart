@@ -144,28 +144,27 @@ class PostBackgroundSection extends StatelessWidget {
     required ValueChanged<int?> onPicked,
   }) async {
     Color pickerColor = Color(initialColor);
+    final l10n = AppLocalizations.of(context)!;
 
     final picked = await AppDialog.show<int>(
       context,
       title: title,
       maxWidth: 360,
-      content: StatefulBuilder(
-        builder: (_, setState) => SingleChildScrollView(
-          child: SizedBox(
-            width: 280,
-            child: ColorPicker(
-              pickerColor: pickerColor,
-              onColorChanged: (color) => setState(() => pickerColor = color),
-              labelTypes: const [],
-              pickerAreaHeightPercent: 0.78,
-              portraitOnly: true,
-              colorPickerWidth: 280,
-            ),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 280,
+          child: ColorPicker(
+            pickerColor: pickerColor,
+            onColorChanged: (color) => pickerColor = color,
+            labelTypes: const [],
+            pickerAreaHeightPercent: 0.78,
+            portraitOnly: true,
+            colorPickerWidth: 280,
           ),
         ),
       ),
-      primaryLabel: AppLocalizations.of(context)!.gotIt,
-      secondaryLabel: AppLocalizations.of(context)!.cancel,
+      primaryLabel: l10n.gotIt,
+      secondaryLabel: l10n.cancel,
       primaryBuilder: () => pickerColor.toARGB32(),
       secondaryResult: -1,
       barrierDismissible: true,
