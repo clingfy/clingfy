@@ -441,7 +441,7 @@ enum AudioMixEngine {
 
     #if compiler(>=6.2)
     // ---------------------------------------------------------
-    // SWIFT 6.2+ API: Used by your Local Machine
+    // SWIFT 6.2+ API: Used by Local Machine
     // ---------------------------------------------------------
     var tap: MTAudioProcessingTap?
     status = MTAudioProcessingTapCreate(
@@ -459,7 +459,7 @@ enum AudioMixEngine {
 
     #else
     // ---------------------------------------------------------
-    // SWIFT 6.1 OR OLDER: Used by your Azure Pipeline
+    // SWIFT 6.1 OR OLDER: Used by Azure Pipeline
     // ---------------------------------------------------------
     var tapOut: Unmanaged<MTAudioProcessingTap>?
     status = MTAudioProcessingTapCreate(
