@@ -43,7 +43,7 @@
 	<key>NSAccessibilityUsageDescription</key>
 	<string>This app needs accessibility to highlight the cursor during recording.</string>
 	
-	<!-- Where Sparkle finds your RSS/appcast -->
+	<!-- Where Sparkle finds RSS/appcast -->
     <key>SUFeedURL</key>
     <string>$(SPARKLE_FEED_URL)</string>
 
