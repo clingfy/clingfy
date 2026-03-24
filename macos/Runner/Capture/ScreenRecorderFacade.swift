@@ -318,6 +318,96 @@ struct RecordingArtifactPromotionPlan {
   }
 }
 
+struct RecordingArtifactPromoter {
+  static func promote(
+    session: RecordingFileSession,
+    recordedRawURL: URL,
+    fileManager: FileManager = .default
+  ) throws -> URL {
+    let promotionPlan = RecordingArtifactPromotionPlan.make(
+      session: session,
+      recordedRawURL: recordedRawURL,
+      fileExists: { fileManager.fileExists(atPath: $0.path) }
+    )
+
+    try moveItemIfExists(
+      from: promotionPlan.sourceRawURL,
+      to: promotionPlan.finalRawURL,
+      fileManager: fileManager
+    )
+
+    let tempSidecars = AppPaths.allSidecarURLs(for: promotionPlan.sourceRawURL)
+    let finalSidecars = AppPaths.allSidecarURLs(for: promotionPlan.finalRawURL)
+    for (src, dst) in zip(tempSidecars, finalSidecars) {
+      try moveItemIfExists(from: src, to: dst, fileManager: fileManager)
+    }
+
+    return promotionPlan.finalRawURL
+  }
+
+  private static func moveItemIfExists(
+    from sourceURL: URL,
+    to destinationURL: URL,
+    fileManager: FileManager
+  ) throws {
+    let src = sourceURL.standardizedFileURL
+    let dst = destinationURL.standardizedFileURL
+
+    if src.path == dst.path { return }
+    guard fileManager.fileExists(atPath: src.path) else { return }
+
+    try fileManager.createDirectory(
+      at: dst.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+
+    if fileManager.fileExists(atPath: dst.path) {
+      try fileManager.removeItem(at: dst)
+    }
+
+    do {
+      try fileManager.moveItem(at: src, to: dst)
+    } catch {
+      try fileManager.copyItem(at: src, to: dst)
+      try? fileManager.removeItem(at: src)
+    }
+  }
+}
+
+enum OverlayRefreshAction: Equatable {
+  case show
+  case resize
+  case reuseVisibleWindow
+}
+
+struct OverlayRefreshPlan {
+  let action: OverlayRefreshAction
+
+  static func make(
+    isShowing: Bool,
+    currentTargetDisplayID: CGDirectDisplayID?,
+    desiredTargetDisplayID: CGDirectDisplayID?,
+    currentPreferredSize: Double,
+    desiredSize: Double
+  ) -> OverlayRefreshPlan {
+    let normalizedDesiredSize = max(120.0, desiredSize)
+
+    guard isShowing else {
+      return OverlayRefreshPlan(action: .show)
+    }
+
+    guard currentTargetDisplayID == desiredTargetDisplayID else {
+      return OverlayRefreshPlan(action: .show)
+    }
+
+    if abs(currentPreferredSize - normalizedDesiredSize) > 0.001 {
+      return OverlayRefreshPlan(action: .resize)
+    }
+
+    return OverlayRefreshPlan(action: .reuseVisibleWindow)
+  }
+}
+
 protocol OverlayManaging: AnyObject {
   var overlayEnabledByUser: Bool { get set }
   var overlayLinkedToRecording: Bool { get set }
@@ -1584,47 +1674,9 @@ final class ScreenRecorderFacade: NSObject {
     return RecordingFileSession(finalRawURL: finalRawURL, inProgressRawURL: tempRawURL)
   }
 
-  private func moveItemIfExists(from sourceURL: URL, to destinationURL: URL) throws {
-    let fm = FileManager.default
-    let src = sourceURL.standardizedFileURL
-    let dst = destinationURL.standardizedFileURL
-
-    if src.path == dst.path { return }
-    guard fm.fileExists(atPath: src.path) else { return }
-
-    try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-    if fm.fileExists(atPath: dst.path) {
-      try fm.removeItem(at: dst)
-    }
-
-    do {
-      try fm.moveItem(at: src, to: dst)
-    } catch {
-      // Fallback for cross-volume moves.
-      try fm.copyItem(at: src, to: dst)
-      try? fm.removeItem(at: src)
-    }
-  }
-
   private func finalizeRecordingArtifactsIfNeeded(recordedRawURL: URL) throws -> URL {
     guard let session = activeRecordingFileSession else { return recordedRawURL }
-
-    let promotionPlan = RecordingArtifactPromotionPlan.make(
-      session: session,
-      recordedRawURL: recordedRawURL,
-      fileExists: { FileManager.default.fileExists(atPath: $0.path) }
-    )
-
-    try moveItemIfExists(from: promotionPlan.sourceRawURL, to: promotionPlan.finalRawURL)
-
-    let tempSidecars = AppPaths.allSidecarURLs(for: promotionPlan.sourceRawURL)
-    let finalSidecars = AppPaths.allSidecarURLs(for: promotionPlan.finalRawURL)
-    for (src, dst) in zip(tempSidecars, finalSidecars) {
-      try moveItemIfExists(from: src, to: dst)
-    }
-
-    return promotionPlan.finalRawURL
+    return try RecordingArtifactPromoter.promote(session: session, recordedRawURL: recordedRawURL)
   }
   private enum CaptureTargetError: Error {
     case noWindowSelected, windowUnavailable, noAreaSelected
@@ -1693,8 +1745,17 @@ final class ScreenRecorderFacade: NSObject {
     stateAsStr()
 
     if shouldShow {
+      let desiredTargetDisplayID = currentCaptureDisplayID ?? selectedDisplayID
+      let overlayRefreshPlan = OverlayRefreshPlan.make(
+        isShowing: camera.isShowing,
+        currentTargetDisplayID: camera.targetDisplayID,
+        desiredTargetDisplayID: desiredTargetDisplayID,
+        currentPreferredSize: camera.preferredSize,
+        desiredSize: prefs.overlaySize
+      )
+
+      camera.targetDisplayID = desiredTargetDisplayID
       camera.setDevice(id: prefs.videoDeviceId)
-      camera.targetDisplayID = currentCaptureDisplayID ?? selectedDisplayID
       camera.updateStyle(
         shape: prefs.overlayShape, shadow: prefs.overlayShadow, border: prefs.overlayBorder,
         roundness: prefs.overlayRoundness)
@@ -1709,32 +1770,33 @@ final class ScreenRecorderFacade: NSObject {
       camera.setRecordingHighlight(enabled: (state == .recording) && prefs.overlayHighlight)
 
       logOverlay(
-        "updateOverlayVisibility -> calling camera.show",
+        "updateOverlayVisibility -> applying camera visibility",
         [
           "size": prefs.overlaySize,
-          "targetDisplay": (currentCaptureDisplayID ?? selectedDisplayID).map { String($0) }
-            ?? "nil",
+          "targetDisplay": desiredTargetDisplayID.map { String($0) } ?? "nil",
+          "action": "\(overlayRefreshPlan.action)",
         ])
 
-      // CameraOverlay.show() now handles idempotency internally,
-      // ensuring we only rebuild if the capture (Chroma Key or Device) changed.
-      camera.show(size: prefs.overlaySize) { [weak self] _ in
-        guard let self else { return }
-        self.logOverlay(
-          "camera.show callback in updateOverlayVisibility",
-          [
-            "state": "\(self.state)",
-            "overlayWindowID": self.camera.overlayWindowID.map { String($0) } ?? "nil",
-          ])
-        if self.state == .recording {
+      switch overlayRefreshPlan.action {
+      case .reuseVisibleWindow:
+        logOverlay("updateOverlayVisibility -> reusing visible camera window")
+        syncOverlayWindowIntoCaptureIfNeeded()
+
+      case .resize:
+        logOverlay("updateOverlayVisibility -> resizing visible camera window")
+        camera.resize(size: prefs.overlaySize)
+        syncOverlayWindowIntoCaptureIfNeeded()
+
+      case .show:
+        camera.show(size: prefs.overlaySize) { [weak self] _ in
+          guard let self else { return }
           self.logOverlay(
-            "calling capture.updateOverlay(windowID:)",
+            "camera.show callback in updateOverlayVisibility",
             [
-              "windowID": self.camera.overlayWindowID.map { String($0) } ?? "nil",
-              "backend": "\(type(of: self.capture))",
+              "state": "\(self.state)",
+              "overlayWindowID": self.camera.overlayWindowID.map { String($0) } ?? "nil",
             ])
-          self.lastOverlayWindowID = self.camera.overlayWindowID
-          self.sendOverlayUpdateIfNeeded(self.camera.overlayWindowID)
+          self.syncOverlayWindowIntoCaptureIfNeeded()
         }
       }
     } else {
@@ -1745,6 +1807,19 @@ final class ScreenRecorderFacade: NSObject {
         sendOverlayUpdateIfNeeded(nil)
       }
     }
+  }
+
+  private func syncOverlayWindowIntoCaptureIfNeeded() {
+    guard state == .recording else { return }
+
+    logOverlay(
+      "calling capture.updateOverlay(windowID:)",
+      [
+        "windowID": camera.overlayWindowID.map { String($0) } ?? "nil",
+        "backend": "\(type(of: capture))",
+      ])
+    lastOverlayWindowID = camera.overlayWindowID
+    sendOverlayUpdateIfNeeded(camera.overlayWindowID)
   }
 
   private func sendOverlayUpdateIfNeeded(_ windowID: CGWindowID?) {

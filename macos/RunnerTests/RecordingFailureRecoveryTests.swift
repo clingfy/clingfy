@@ -57,6 +57,44 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     XCTAssertEqual(plan.finalRawURL, session.finalRawURL)
   }
 
+  func testRecordingArtifactPromoterMovesRawAndSidecarsToFinalRecording() throws {
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: rootURL) }
+
+    let session = RecordingFileSession(
+      finalRawURL: rootURL.appendingPathComponent("final.mov"),
+      inProgressRawURL: rootURL.appendingPathComponent("temp.inprogress.mov")
+    )
+    let recordedRawURL = rootURL.appendingPathComponent("backend.mov")
+
+    try Data("raw".utf8).write(to: session.inProgressRawURL)
+    try Data("cursor".utf8).write(to: AppPaths.cursorSidecarURL(for: session.inProgressRawURL))
+    try Data("meta".utf8).write(to: AppPaths.metadataSidecarURL(for: session.inProgressRawURL))
+
+    let promotedURL = try RecordingArtifactPromoter.promote(
+      session: session,
+      recordedRawURL: recordedRawURL,
+      fileManager: fileManager
+    )
+
+    XCTAssertEqual(promotedURL.standardizedFileURL, session.finalRawURL.standardizedFileURL)
+    XCTAssertTrue(fileManager.fileExists(atPath: session.finalRawURL.path))
+    XCTAssertTrue(fileManager.fileExists(atPath: AppPaths.cursorSidecarURL(for: session.finalRawURL).path))
+    XCTAssertTrue(fileManager.fileExists(atPath: AppPaths.metadataSidecarURL(for: session.finalRawURL).path))
+    XCTAssertFalse(fileManager.fileExists(atPath: session.inProgressRawURL.path))
+    XCTAssertFalse(
+      fileManager.fileExists(atPath: AppPaths.cursorSidecarURL(for: session.inProgressRawURL).path)
+    )
+    XCTAssertFalse(
+      fileManager.fileExists(
+        atPath: AppPaths.metadataSidecarURL(for: session.inProgressRawURL).path
+      )
+    )
+  }
+
   func testTerminalCompletionGuardSuppressesDuplicatesUntilReset() {
     var guardState = TerminalCompletionGuard()
 
@@ -108,5 +146,37 @@ final class RecordingFailureRecoveryTests: XCTestCase {
 
     wait(for: [completion], timeout: 1.0)
     XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+  }
+
+  func testCursorRecordingWriterCompletesAfterSidecarExists() {
+    let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent(UUID().uuidString)
+      .appendingPathExtension("cursor.json")
+    let recording = CursorRecording(
+      sprites: [],
+      frames: [CursorFrame(t: 0.0, x: 0.5, y: 0.25, spriteID: -1)]
+    )
+    let completion = expectation(description: "cursor writer completion")
+
+    CursorRecordingWriter.write(
+      recording: recording,
+      to: outputURL,
+      queue: DispatchQueue(label: "test.cursor.writer")
+    ) {
+      XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+
+      do {
+        let data = try Data(contentsOf: outputURL)
+        let decoded = try JSONDecoder().decode(CursorRecording.self, from: data)
+        XCTAssertEqual(decoded.frames.count, 1)
+      } catch {
+        XCTFail("Expected cursor sidecar to be readable before completion: \(error)")
+      }
+
+      try? FileManager.default.removeItem(at: outputURL)
+      completion.fulfill()
+    }
+
+    wait(for: [completion], timeout: 1.0)
   }
 }

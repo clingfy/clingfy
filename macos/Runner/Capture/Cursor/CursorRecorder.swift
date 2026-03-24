@@ -33,6 +33,37 @@ struct CursorRecording: Codable {
   let frames: [CursorFrame]
 }
 
+struct CursorRecordingWriter {
+  static func write(
+    recording: CursorRecording,
+    to outputURL: URL,
+    queue: DispatchQueue,
+    completion: @escaping () -> Void
+  ) {
+    queue.async {
+      do {
+        let data = try JSONEncoder().encode(recording)
+        try data.write(to: outputURL)
+
+        NativeLogger.i(
+          "CursorRecorder",
+          "Saved cursor recording",
+          context: ["path": outputURL.path]
+        )
+      } catch {
+        NativeLogger.e(
+          "CursorRecorder",
+          "Failed to save cursor recording",
+          context: ["error": error.localizedDescription]
+        )
+      }
+      DispatchQueue.main.async {
+        completion()
+      }
+    }
+  }
+}
+
 private struct SpriteKey: Hashable {
   let width: Int
   let height: Int
@@ -119,8 +150,12 @@ final class CursorRecorder {
         "Stop skipped because cursor capture was not active",
         context: ["path": outputURL.path]
       )
-      DispatchQueue.main.async {
+      if Thread.isMainThread {
         completion()
+      } else {
+        DispatchQueue.main.async {
+          completion()
+        }
       }
       return
     }
@@ -151,27 +186,12 @@ final class CursorRecorder {
 
     let recording = CursorRecording(sprites: localSprites, frames: localFrames)
 
-    queue.async {
-      do {
-        let data = try JSONEncoder().encode(recording)
-        try data.write(to: outputURL)
-
-        NativeLogger.i(
-          "CursorRecorder",
-          "Saved cursor recording",
-          context: ["path": outputURL.path]
-        )
-      } catch {
-        NativeLogger.e(
-          "CursorRecorder",
-          "Failed to save cursor recording",
-          context: ["error": error.localizedDescription]
-        )
-      }
-      DispatchQueue.main.async {
-        completion()
-      }
-    }
+    CursorRecordingWriter.write(
+      recording: recording,
+      to: outputURL,
+      queue: queue,
+      completion: completion
+    )
   }
 
   func cancel() {
