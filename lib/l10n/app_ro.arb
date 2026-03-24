@@ -90,6 +90,18 @@
   "storageRefresh": "Reîmprospătează",
   "storageOpenRecordingsFolder": "Deschide folderul înregistrărilor",
   "storageOpenTempFolder": "Deschide folderul temporar",
+  "storageClearCachedRecordings": "Șterge înregistrările din cache",
+  "storageClearCachedRecordingsConfirmTitle": "Ștergi înregistrările din cache?",
+  "storageClearCachedRecordingsConfirmMessage": "Aceasta elimină copiile interne ale înregistrărilor și fișierele sidecar ale Clingfy. Înregistrările exportate nu sunt șterse, iar acțiunea nu poate fi anulată.",
+  "storageClearCachedRecordingsConfirmAction": "Șterge înregistrările",
+  "storageClearCachedRecordingsSuccess": "{count, plural, one{A fost eliminată 1 înregistrare din cache.} other{Au fost eliminate {count} înregistrări din cache.}}",
+  "@storageClearCachedRecordingsSuccess": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "storageStatusLabel": "Stare",
   "storageTotalSpace": "Total",
   "storageUsedSpace": "Folosit",

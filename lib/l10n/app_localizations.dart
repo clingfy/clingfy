@@ -2182,6 +2182,36 @@ abstract class AppLocalizations {
   /// **'Open temp folder'**
   String get storageOpenTempFolder;
 
+  /// No description provided for @storageClearCachedRecordings.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear cached recordings'**
+  String get storageClearCachedRecordings;
+
+  /// No description provided for @storageClearCachedRecordingsConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear cached recordings?'**
+  String get storageClearCachedRecordingsConfirmTitle;
+
+  /// No description provided for @storageClearCachedRecordingsConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This removes Clingfy\'s internal recording copies and sidecars. Exported recordings are not deleted, and this action cannot be undone.'**
+  String get storageClearCachedRecordingsConfirmMessage;
+
+  /// No description provided for @storageClearCachedRecordingsConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear recordings'**
+  String get storageClearCachedRecordingsConfirmAction;
+
+  /// No description provided for @storageClearCachedRecordingsSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{Removed 1 cached recording.} other{Removed {count} cached recordings.}}'**
+  String storageClearCachedRecordingsSuccess(int count);
+
   /// No description provided for @storageStatusLabel.
   ///
   /// In en, this message translates to:

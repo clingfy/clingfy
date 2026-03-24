@@ -1127,6 +1127,31 @@ class AppLocalizationsAr extends AppLocalizations {
   String get storageOpenTempFolder => 'افتح المجلد المؤقت';
 
   @override
+  String get storageClearCachedRecordings => 'امسح التسجيلات المخزنة مؤقتًا';
+
+  @override
+  String get storageClearCachedRecordingsConfirmTitle =>
+      'مسح التسجيلات المخزنة مؤقتًا؟';
+
+  @override
+  String get storageClearCachedRecordingsConfirmMessage =>
+      'سيؤدي هذا إلى إزالة نسخ التسجيلات الداخلية والملفات الجانبية الخاصة بـ Clingfy. لن يتم حذف التسجيلات المصدّرة، ولا يمكن التراجع عن هذا الإجراء.';
+
+  @override
+  String get storageClearCachedRecordingsConfirmAction => 'امسح التسجيلات';
+
+  @override
+  String storageClearCachedRecordingsSuccess(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'تمت إزالة $count تسجيلات مخزنة مؤقتًا.',
+      one: 'تمت إزالة تسجيل مخزن مؤقتًا واحد.',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get storageStatusLabel => 'الحالة';
 
   @override

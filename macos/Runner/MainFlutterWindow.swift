@@ -437,6 +437,19 @@ class MainFlutterWindow: NSWindow {
               details: nil))
         }
 
+      case "clearCachedRecordings":
+        guard self.screenRecorder.canClearCachedRecordings() else {
+          result(
+            FlutterError(
+              code: "RECORDINGS_IN_USE",
+              message: "Cached recordings cannot be cleared while recording is active.",
+              details: nil))
+          return
+        }
+
+        let deletedCount = self.screenRecorder.clearCachedRecordings()
+        result(["deletedCount": deletedCount])
+
       case "revealFile":
         if let args = call.arguments as? [String: Any],
           let path = args["path"] as? String

@@ -1137,6 +1137,31 @@ class AppLocalizationsEn extends AppLocalizations {
   String get storageOpenTempFolder => 'Open temp folder';
 
   @override
+  String get storageClearCachedRecordings => 'Clear cached recordings';
+
+  @override
+  String get storageClearCachedRecordingsConfirmTitle =>
+      'Clear cached recordings?';
+
+  @override
+  String get storageClearCachedRecordingsConfirmMessage =>
+      'This removes Clingfy\'s internal recording copies and sidecars. Exported recordings are not deleted, and this action cannot be undone.';
+
+  @override
+  String get storageClearCachedRecordingsConfirmAction => 'Clear recordings';
+
+  @override
+  String storageClearCachedRecordingsSuccess(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Removed $count cached recordings.',
+      one: 'Removed 1 cached recording.',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get storageStatusLabel => 'Status';
 
   @override

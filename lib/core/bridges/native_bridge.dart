@@ -353,6 +353,19 @@ class NativeBridge {
     await _nativeBridge.invokeMethod<void>('revealTempFolder');
   }
 
+  Future<int> clearCachedRecordings() async {
+    final raw = await _nativeBridge.invokeMethod<Map<dynamic, dynamic>>(
+      'clearCachedRecordings',
+    );
+    if (raw == null) {
+      throw StateError('Native clearCachedRecordings returned null.');
+    }
+    final deletedCount = raw['deletedCount'];
+    if (deletedCount is int) return deletedCount;
+    if (deletedCount is num) return deletedCount.toInt();
+    return int.tryParse(deletedCount?.toString() ?? '') ?? 0;
+  }
+
   Future<void> previewOpen({
     required String sessionId,
     required String path,

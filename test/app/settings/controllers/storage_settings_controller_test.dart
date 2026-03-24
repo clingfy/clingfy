@@ -115,4 +115,46 @@ void main() {
       expect(controller.isLoading, isFalse);
     },
   );
+
+  test(
+    'clearCachedRecordings delegates to native and refreshes snapshot',
+    () async {
+      var snapshotCalls = 0;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            switch (call.method) {
+              case 'getStorageSnapshot':
+                snapshotCalls += 1;
+                return <String, dynamic>{
+                  'systemTotalBytes': 500 * 1024 * 1024 * 1024,
+                  'systemAvailableBytes': 200 * 1024 * 1024 * 1024,
+                  'recordingsBytes': snapshotCalls == 1 ? 4 * 1024 * 1024 : 0,
+                  'tempBytes': 2 * 1024 * 1024,
+                  'logsBytes': 512 * 1024,
+                  'recordingsPath': '/tmp/recordings',
+                  'tempPath': '/tmp/temp',
+                  'logsPath': '/tmp/logs',
+                  'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
+                  'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
+                };
+              case 'clearCachedRecordings':
+                return <String, dynamic>{'deletedCount': 2};
+            }
+            return null;
+          });
+
+      final controller = StorageSettingsController(
+        nativeBridge: NativeBridge.instance,
+      );
+
+      await controller.refresh();
+      final deletedCount = await controller.clearCachedRecordings();
+
+      expect(deletedCount, 2);
+      expect(snapshotCalls, 2);
+      expect(controller.snapshot?.recordingsBytes, 0);
+      expect(controller.error, isNull);
+    },
+  );
 }

@@ -114,6 +114,7 @@ Future<void> installCommonNativeMocks({
       case 'openSystemSettings':
       case 'revealRecordingsFolder':
       case 'revealTempFolder':
+      case 'clearCachedRecordings':
       case 'setAudioMix':
       case 'previewOpen':
       case 'previewClose':

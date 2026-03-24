@@ -388,6 +388,18 @@
   "storageRefresh": "Refresh",
   "storageOpenRecordingsFolder": "Open recordings folder",
   "storageOpenTempFolder": "Open temp folder",
+  "storageClearCachedRecordings": "Clear cached recordings",
+  "storageClearCachedRecordingsConfirmTitle": "Clear cached recordings?",
+  "storageClearCachedRecordingsConfirmMessage": "This removes Clingfy's internal recording copies and sidecars. Exported recordings are not deleted, and this action cannot be undone.",
+  "storageClearCachedRecordingsConfirmAction": "Clear recordings",
+  "storageClearCachedRecordingsSuccess": "{count, plural, one{Removed 1 cached recording.} other{Removed {count} cached recordings.}}",
+  "@storageClearCachedRecordingsSuccess": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "storageStatusLabel": "Status",
   "storageTotalSpace": "Total",
   "storageUsedSpace": "Used",

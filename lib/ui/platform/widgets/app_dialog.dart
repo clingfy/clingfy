@@ -89,7 +89,7 @@ class AppDialog {
           onClosePressed: showCloseButton
               ? () => Navigator.of(ctx).pop(closeResult)
               : null,
-          maxWidth: maxWidth ?? 300,
+          maxWidth: maxWidth ?? 380,
         ),
       );
     }

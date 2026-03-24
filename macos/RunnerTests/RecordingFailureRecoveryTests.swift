@@ -237,6 +237,49 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(snapshot.logsBytes, Int64(logsData.count))
   }
 
+  func testRecordingStoreDeleteAllOnlyRemovesFilesFromRecordingsWorkspace() throws {
+    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let recordingsURL = rootURL.appendingPathComponent("recordings", isDirectory: true)
+    let tempURL = rootURL.appendingPathComponent("temp", isDirectory: true)
+    let logsURL = rootURL.appendingPathComponent("logs", isDirectory: true)
+    let fileManager = FileManager.default
+
+    try fileManager.createDirectory(at: recordingsURL, withIntermediateDirectories: true)
+    try fileManager.createDirectory(at: tempURL, withIntermediateDirectories: true)
+    try fileManager.createDirectory(at: logsURL, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: rootURL) }
+
+    let rawURL = recordingsURL.appendingPathComponent("clip.mov")
+    let cursorURL = AppPaths.cursorSidecarURL(for: rawURL)
+    let metaURL = AppPaths.metadataSidecarURL(for: rawURL)
+    let tempArtifactURL = tempURL.appendingPathComponent("capture.inprogress.mov")
+    let logURL = logsURL.appendingPathComponent("logs_2026-03-25.jsonl")
+
+    try Data("raw".utf8).write(to: rawURL)
+    try Data("cursor".utf8).write(to: cursorURL)
+    try Data("meta".utf8).write(to: metaURL)
+    try Data("temp".utf8).write(to: tempArtifactURL)
+    try Data("log".utf8).write(to: logURL)
+
+    let store = RecordingStore(rootURL: recordingsURL, fileManager: fileManager)
+    let deletedCount = store.deleteAll()
+
+    XCTAssertEqual(deletedCount, 1)
+    XCTAssertFalse(fileManager.fileExists(atPath: rawURL.path))
+    XCTAssertFalse(fileManager.fileExists(atPath: cursorURL.path))
+    XCTAssertFalse(fileManager.fileExists(atPath: metaURL.path))
+    XCTAssertTrue(fileManager.fileExists(atPath: tempArtifactURL.path))
+    XCTAssertTrue(fileManager.fileExists(atPath: logURL.path))
+  }
+
+  func testCachedRecordingsCleanupPolicyAllowsOnlyIdleState() {
+    XCTAssertTrue(CachedRecordingsCleanupPolicy.canClear(recorderState: .idle))
+    XCTAssertFalse(CachedRecordingsCleanupPolicy.canClear(recorderState: .starting))
+    XCTAssertFalse(CachedRecordingsCleanupPolicy.canClear(recorderState: .recording))
+    XCTAssertFalse(CachedRecordingsCleanupPolicy.canClear(recorderState: .stopping))
+  }
+
   func testCaptureDestinationPreflightBypassAllowedForNonProductionBuilds() {
     XCTAssertTrue(
       CaptureDestinationPreflightPolicy.shouldBypassLowStorageCheck(

@@ -1146,6 +1146,32 @@ class AppLocalizationsRo extends AppLocalizations {
   String get storageOpenTempFolder => 'Deschide folderul temporar';
 
   @override
+  String get storageClearCachedRecordings => 'Șterge înregistrările din cache';
+
+  @override
+  String get storageClearCachedRecordingsConfirmTitle =>
+      'Ștergi înregistrările din cache?';
+
+  @override
+  String get storageClearCachedRecordingsConfirmMessage =>
+      'Aceasta elimină copiile interne ale înregistrărilor și fișierele sidecar ale Clingfy. Înregistrările exportate nu sunt șterse, iar acțiunea nu poate fi anulată.';
+
+  @override
+  String get storageClearCachedRecordingsConfirmAction =>
+      'Șterge înregistrările';
+
+  @override
+  String storageClearCachedRecordingsSuccess(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Au fost eliminate $count înregistrări din cache.',
+      one: 'A fost eliminată 1 înregistrare din cache.',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get storageStatusLabel => 'Stare';
 
   @override

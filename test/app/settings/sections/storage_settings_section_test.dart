@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clingfy/app/home/recording/recording_controller.dart';
 import 'package:clingfy/app/settings/sections/storage_settings_section.dart';
 import 'package:clingfy/app/settings/settings_controller.dart';
 import 'package:clingfy/core/bridges/native_bridge.dart';
@@ -10,13 +11,39 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:macos_ui/macos_ui.dart';
+import 'package:provider/provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const channel = MethodChannel(NativeChannel.screenRecorder);
 
-  Widget buildTestApp(SettingsController settings) {
+  Map<String, dynamic> storageSnapshotPayload({
+    int systemAvailableBytes = 200 * 1024 * 1024 * 1024,
+    int recordingsBytes = 4 * 1024 * 1024,
+    int tempBytes = 2 * 1024 * 1024,
+    int logsBytes = 512 * 1024,
+  }) {
+    return <String, dynamic>{
+      'systemTotalBytes': 500 * 1024 * 1024 * 1024,
+      'systemAvailableBytes': systemAvailableBytes,
+      'recordingsBytes': recordingsBytes,
+      'tempBytes': tempBytes,
+      'logsBytes': logsBytes,
+      'recordingsPath': '/tmp/recordings',
+      'tempPath': '/tmp/temp',
+      'logsPath': '/tmp/logs',
+      'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
+      'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
+    };
+  }
+
+  Widget buildTestApp(
+    SettingsController settings, {
+    bool showDeveloperTools = true,
+    Duration autoRefreshInterval = const Duration(seconds: 30),
+    RecordingController? recordingController,
+  }) {
     return MaterialApp(
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
@@ -26,13 +53,57 @@ void main() {
         data: buildMacosTheme(Theme.of(context).brightness),
         child: child!,
       ),
-      home: Scaffold(
-        body: StorageSettingsSection(
-          controller: settings,
-          showDeveloperTools: true,
-        ),
+      home: recordingController != null
+          ? ChangeNotifierProvider<RecordingController>.value(
+              value: recordingController,
+              child: Scaffold(
+                body: StorageSettingsSection(
+                  controller: settings,
+                  showDeveloperTools: showDeveloperTools,
+                  autoRefreshInterval: autoRefreshInterval,
+                ),
+              ),
+            )
+          : ChangeNotifierProvider<RecordingController>(
+              create: (_) => RecordingController(
+                nativeBridge: NativeBridge.instance,
+                settings: settings,
+              ),
+              child: Scaffold(
+                body: StorageSettingsSection(
+                  controller: settings,
+                  showDeveloperTools: showDeveloperTools,
+                  autoRefreshInterval: autoRefreshInterval,
+                ),
+              ),
+            ),
+    );
+  }
+
+  Future<void> pumpStorageSection(
+    WidgetTester tester,
+    SettingsController settings, {
+    bool showDeveloperTools = true,
+    Duration autoRefreshInterval = const Duration(seconds: 30),
+    RecordingController? recordingController,
+  }) async {
+    await tester.pumpWidget(
+      buildTestApp(
+        settings,
+        showDeveloperTools: showDeveloperTools,
+        autoRefreshInterval: autoRefreshInterval,
+        recordingController: recordingController,
       ),
     );
+  }
+
+  Future<void> scrollToClearButton(WidgetTester tester) async {
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('storage_clear_cached_recordings_button')),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
   }
 
   tearDown(() async {
@@ -56,18 +127,7 @@ void main() {
 
     expect(find.text('Loading…'), findsOneWidget);
 
-    completer.complete(<String, dynamic>{
-      'systemTotalBytes': 500 * 1024 * 1024 * 1024,
-      'systemAvailableBytes': 200 * 1024 * 1024 * 1024,
-      'recordingsBytes': 4 * 1024 * 1024,
-      'tempBytes': 2 * 1024 * 1024,
-      'logsBytes': 512 * 1024,
-      'recordingsPath': '/tmp/recordings',
-      'tempPath': '/tmp/temp',
-      'logsPath': '/tmp/logs',
-      'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
-      'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
-    });
+    completer.complete(<String, dynamic>{...storageSnapshotPayload()});
     await tester.pumpAndSettle();
 
     expect(find.text('Healthy'), findsWidgets);
@@ -78,23 +138,16 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'getStorageSnapshot') {
             return <String, dynamic>{
-              'systemTotalBytes': 500 * 1024 * 1024 * 1024,
-              'systemAvailableBytes': 15 * 1024 * 1024 * 1024,
-              'recordingsBytes': 4 * 1024 * 1024,
-              'tempBytes': 2 * 1024 * 1024,
-              'logsBytes': 512 * 1024,
-              'recordingsPath': '/tmp/recordings',
-              'tempPath': '/tmp/temp',
-              'logsPath': '/tmp/logs',
-              'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
-              'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
+              ...storageSnapshotPayload(
+                systemAvailableBytes: 15 * 1024 * 1024 * 1024,
+              ),
             };
           }
           return null;
         });
 
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
-    await tester.pumpWidget(buildTestApp(settings));
+    await pumpStorageSection(tester, settings);
     await tester.pumpAndSettle();
 
     expect(find.text('Warning'), findsWidgets);
@@ -108,24 +161,13 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'getStorageSnapshot') {
-            return <String, dynamic>{
-              'systemTotalBytes': 500 * 1024 * 1024 * 1024,
-              'systemAvailableBytes': 200 * 1024 * 1024 * 1024,
-              'recordingsBytes': 4 * 1024 * 1024,
-              'tempBytes': 2 * 1024 * 1024,
-              'logsBytes': 512 * 1024,
-              'recordingsPath': '/tmp/recordings',
-              'tempPath': '/tmp/temp',
-              'logsPath': '/tmp/logs',
-              'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
-              'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
-            };
+            return <String, dynamic>{...storageSnapshotPayload()};
           }
           return null;
         });
 
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
-    await tester.pumpWidget(buildTestApp(settings));
+    await pumpStorageSection(tester, settings);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('storage_system_chart')), findsOneWidget);
@@ -147,23 +189,16 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'getStorageSnapshot') {
             return <String, dynamic>{
-              'systemTotalBytes': 500 * 1024 * 1024 * 1024,
-              'systemAvailableBytes': 5 * 1024 * 1024 * 1024,
-              'recordingsBytes': 4 * 1024 * 1024,
-              'tempBytes': 2 * 1024 * 1024,
-              'logsBytes': 512 * 1024,
-              'recordingsPath': '/tmp/recordings',
-              'tempPath': '/tmp/temp',
-              'logsPath': '/tmp/logs',
-              'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
-              'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
+              ...storageSnapshotPayload(
+                systemAvailableBytes: 5 * 1024 * 1024 * 1024,
+              ),
             };
           }
           return null;
         });
 
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
-    await tester.pumpWidget(buildTestApp(settings));
+    await pumpStorageSection(tester, settings);
     await tester.pumpAndSettle();
 
     expect(find.text('Critical'), findsWidgets);
@@ -182,7 +217,7 @@ void main() {
         });
 
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
-    await tester.pumpWidget(buildTestApp(settings));
+    await pumpStorageSection(tester, settings);
     await tester.pumpAndSettle();
 
     expect(find.text('Storage action failed.'), findsOneWidget);
@@ -193,47 +228,21 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'getStorageSnapshot') {
-            return <String, dynamic>{
-              'systemTotalBytes': 500 * 1024 * 1024 * 1024,
-              'systemAvailableBytes': 200 * 1024 * 1024 * 1024,
-              'recordingsBytes': 4 * 1024 * 1024,
-              'tempBytes': 2 * 1024 * 1024,
-              'logsBytes': 512 * 1024,
-              'recordingsPath': '/tmp/recordings',
-              'tempPath': '/tmp/temp',
-              'logsPath': '/tmp/logs',
-              'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
-              'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
-            };
+            return <String, dynamic>{...storageSnapshotPayload()};
           }
           return null;
         });
 
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildLightTheme(),
-        darkTheme: buildDarkTheme(),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        builder: (context, child) => MacosTheme(
-          data: buildMacosTheme(Theme.of(context).brightness),
-          child: child!,
-        ),
-        home: Scaffold(
-          body: StorageSettingsSection(
-            controller: settings,
-            showDeveloperTools: false,
-          ),
-        ),
-      ),
-    );
+    await pumpStorageSection(tester, settings, showDeveloperTools: false);
     await tester.pumpAndSettle();
 
     expect(find.text('Actions'), findsNothing);
     expect(find.text('Paths'), findsNothing);
     expect(find.text('Open recordings folder'), findsNothing);
     expect(find.text('Open temp folder'), findsNothing);
+    await scrollToClearButton(tester);
+    expect(find.text('Clear cached recordings'), findsOneWidget);
   });
 
   testWidgets('auto refreshes while the section stays visible', (tester) async {
@@ -242,41 +251,16 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'getStorageSnapshot') {
             calls += 1;
-            return <String, dynamic>{
-              'systemTotalBytes': 500 * 1024 * 1024 * 1024,
-              'systemAvailableBytes': 200 * 1024 * 1024 * 1024,
-              'recordingsBytes': 4 * 1024 * 1024,
-              'tempBytes': 2 * 1024 * 1024,
-              'logsBytes': 512 * 1024,
-              'recordingsPath': '/tmp/recordings',
-              'tempPath': '/tmp/temp',
-              'logsPath': '/tmp/logs',
-              'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
-              'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
-            };
+            return <String, dynamic>{...storageSnapshotPayload()};
           }
           return null;
         });
 
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildLightTheme(),
-        darkTheme: buildDarkTheme(),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        builder: (context, child) => MacosTheme(
-          data: buildMacosTheme(Theme.of(context).brightness),
-          child: child!,
-        ),
-        home: Scaffold(
-          body: StorageSettingsSection(
-            controller: settings,
-            autoRefreshInterval: const Duration(seconds: 1),
-            showDeveloperTools: true,
-          ),
-        ),
-      ),
+    await pumpStorageSection(
+      tester,
+      settings,
+      autoRefreshInterval: const Duration(seconds: 1),
     );
 
     await tester.pump();
@@ -287,5 +271,146 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(calls, greaterThanOrEqualTo(2));
+  });
+
+  testWidgets('clear cached recordings is disabled when no recordings exist', (
+    tester,
+  ) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getStorageSnapshot') {
+            return <String, dynamic>{
+              ...storageSnapshotPayload(recordingsBytes: 0),
+            };
+          }
+          return null;
+        });
+
+    final settings = SettingsController(nativeBridge: NativeBridge.instance);
+    await pumpStorageSection(tester, settings, showDeveloperTools: false);
+    await tester.pumpAndSettle();
+    await scrollToClearButton(tester);
+
+    final button = tester.widget<OutlinedButton>(
+      find.descendant(
+        of: find.byKey(const Key('storage_clear_cached_recordings_button')),
+        matching: find.byType(OutlinedButton),
+      ),
+    );
+    expect(button.onPressed, isNull);
+  });
+
+  testWidgets(
+    'clear cached recordings is disabled while workflow is not idle',
+    (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'getStorageSnapshot') {
+              return <String, dynamic>{...storageSnapshotPayload()};
+            }
+            return null;
+          });
+
+      final settings = SettingsController(nativeBridge: NativeBridge.instance);
+      final recordingController = RecordingController(
+        nativeBridge: NativeBridge.instance,
+        settings: settings,
+      )..beginRecordingStartIntent();
+      addTearDown(recordingController.dispose);
+
+      await pumpStorageSection(
+        tester,
+        settings,
+        showDeveloperTools: false,
+        recordingController: recordingController,
+      );
+      await tester.pumpAndSettle();
+      await scrollToClearButton(tester);
+
+      final button = tester.widget<OutlinedButton>(
+        find.descendant(
+          of: find.byKey(const Key('storage_clear_cached_recordings_button')),
+          matching: find.byType(OutlinedButton),
+        ),
+      );
+      expect(button.onPressed, isNull);
+    },
+  );
+
+  testWidgets('confirming clear cached recordings deletes and refreshes', (
+    tester,
+  ) async {
+    var getSnapshotCalls = 0;
+    var clearCalls = 0;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          switch (call.method) {
+            case 'getStorageSnapshot':
+              getSnapshotCalls += 1;
+              return <String, dynamic>{
+                ...storageSnapshotPayload(
+                  recordingsBytes: getSnapshotCalls == 1 ? 4 * 1024 * 1024 : 0,
+                ),
+              };
+            case 'clearCachedRecordings':
+              clearCalls += 1;
+              return <String, dynamic>{'deletedCount': 2};
+          }
+          return null;
+        });
+
+    final settings = SettingsController(nativeBridge: NativeBridge.instance);
+    await pumpStorageSection(tester, settings, showDeveloperTools: false);
+    await tester.pumpAndSettle();
+    await scrollToClearButton(tester);
+
+    await tester.tap(
+      find.byKey(const Key('storage_clear_cached_recordings_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clear cached recordings?'), findsOneWidget);
+    await tester.tap(find.text('Clear recordings'));
+    await tester.pumpAndSettle();
+
+    expect(clearCalls, 1);
+    expect(getSnapshotCalls, 2);
+    await tester.fling(find.byType(ListView), const Offset(0, 1000), 2000);
+    await tester.pumpAndSettle();
+    expect(find.text('Removed 2 cached recordings.'), findsOneWidget);
+  });
+
+  testWidgets('canceling clear cached recordings performs no deletion', (
+    tester,
+  ) async {
+    var clearCalls = 0;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getStorageSnapshot') {
+            return <String, dynamic>{...storageSnapshotPayload()};
+          }
+          if (call.method == 'clearCachedRecordings') {
+            clearCalls += 1;
+            return <String, dynamic>{'deletedCount': 1};
+          }
+          return null;
+        });
+
+    final settings = SettingsController(nativeBridge: NativeBridge.instance);
+    await pumpStorageSection(tester, settings, showDeveloperTools: false);
+    await tester.pumpAndSettle();
+    await scrollToClearButton(tester);
+
+    await tester.tap(
+      find.byKey(const Key('storage_clear_cached_recordings_button')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(clearCalls, 0);
   });
 }

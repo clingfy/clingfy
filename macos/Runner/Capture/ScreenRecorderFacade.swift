@@ -36,6 +36,12 @@ struct OverlayUpdateDeduper {
   }
 }
 
+enum CachedRecordingsCleanupPolicy {
+  static func canClear(recorderState: RecorderState) -> Bool {
+    recorderState == .idle
+  }
+}
+
 enum AudioLevelEstimator {
   static func dbfs(for linear: Double) -> Double {
     let clamped = max(linear, 0.000000001)
@@ -2306,6 +2312,20 @@ final class ScreenRecorderFacade: NSObject {
   private func isStartingOrRecording() -> Bool {
     return state == .starting || state == .recording
   }
+
+  func canClearCachedRecordings() -> Bool {
+    CachedRecordingsCleanupPolicy.canClear(recorderState: state)
+  }
+
+  func clearCachedRecordings() -> Int {
+    let deletedCount = recordingStore.deleteAll()
+    NativeLogger.i(
+      "Facade", "Cleared cached recordings",
+      context: ["deletedCount": deletedCount]
+    )
+    return deletedCount
+  }
+
   private func exportFormatInfo(_ formatRaw: String) -> ExportFormatInfo {
     switch formatRaw.lowercased() {
 

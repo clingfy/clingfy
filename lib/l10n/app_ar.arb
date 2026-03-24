@@ -90,6 +90,18 @@
   "storageRefresh": "تحديث",
   "storageOpenRecordingsFolder": "افتح مجلد التسجيلات",
   "storageOpenTempFolder": "افتح المجلد المؤقت",
+  "storageClearCachedRecordings": "امسح التسجيلات المخزنة مؤقتًا",
+  "storageClearCachedRecordingsConfirmTitle": "مسح التسجيلات المخزنة مؤقتًا؟",
+  "storageClearCachedRecordingsConfirmMessage": "سيؤدي هذا إلى إزالة نسخ التسجيلات الداخلية والملفات الجانبية الخاصة بـ Clingfy. لن يتم حذف التسجيلات المصدّرة، ولا يمكن التراجع عن هذا الإجراء.",
+  "storageClearCachedRecordingsConfirmAction": "امسح التسجيلات",
+  "storageClearCachedRecordingsSuccess": "{count, plural, one{تمت إزالة تسجيل مخزن مؤقتًا واحد.} other{تمت إزالة {count} تسجيلات مخزنة مؤقتًا.}}",
+  "@storageClearCachedRecordingsSuccess": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "storageStatusLabel": "الحالة",
   "storageTotalSpace": "الإجمالي",
   "storageUsedSpace": "المستخدم",

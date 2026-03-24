@@ -57,4 +57,10 @@ class StorageSettingsController extends ChangeNotifier {
   Future<void> revealTempFolder() async {
     await _nativeBridge.revealTempFolder();
   }
+
+  Future<int> clearCachedRecordings() async {
+    final deletedCount = await _nativeBridge.clearCachedRecordings();
+    await refresh();
+    return deletedCount;
+  }
 }

@@ -2,14 +2,19 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:clingfy/app/config/build_config.dart';
+import 'package:clingfy/app/home/recording/recording_controller.dart';
 import 'package:clingfy/app/settings/sections/section_helpers.dart';
 import 'package:clingfy/app/settings/settings_controller.dart';
+import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/core/models/storage_snapshot.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
+import 'package:clingfy/ui/platform/widgets/app_dialog.dart';
 import 'package:clingfy/ui/platform/widgets/app_button.dart';
 import 'package:clingfy/ui/platform/widgets/app_inline_notice.dart';
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 class StorageSettingsSection extends StatefulWidget {
   const StorageSettingsSection({
@@ -35,7 +40,9 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
   static const _logsColor = Color(0xFF58B6C0);
 
   String? _actionError;
+  String? _actionSuccess;
   Timer? _autoRefreshTimer;
+  bool _isRunningAction = false;
 
   bool get _showDeveloperTools =>
       widget.showDeveloperTools ?? BuildConfig.isDev();
@@ -87,29 +94,97 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
     _startAutoRefresh();
   }
 
-  Future<void> _runAction(Future<void> Function() action) async {
+  Future<T?> _runAction<T>(
+    Future<T> Function() action, {
+    required String fallbackError,
+  }) async {
+    if (_isRunningAction) {
+      return null;
+    }
+
     try {
       setState(() {
         _actionError = null;
+        _actionSuccess = null;
+        _isRunningAction = true;
       });
-      await action();
+
+      final result = await action();
+      return result;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
-        _actionError = e.toString();
+        _actionError = _formatActionError(e, fallbackError);
       });
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunningAction = false;
+        });
+      }
     }
+  }
+
+  Future<void> _confirmAndClearCachedRecordings(BuildContext context) async {
+    final l10n = AppLocalizations.of(context)!;
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: l10n.storageClearCachedRecordingsConfirmTitle,
+      message: l10n.storageClearCachedRecordingsConfirmMessage,
+      confirmLabel: l10n.storageClearCachedRecordingsConfirmAction,
+      cancelLabel: l10n.cancel,
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    final deletedCount = await _runAction<int>(
+      widget.controller.storage.clearCachedRecordings,
+      fallbackError: l10n.storageActionFailed,
+    );
+    if (!mounted || deletedCount == null || deletedCount <= 0) {
+      return;
+    }
+
+    setState(() {
+      _actionSuccess = l10n.storageClearCachedRecordingsSuccess(deletedCount);
+    });
+  }
+
+  String _formatActionError(Object error, String fallbackError) {
+    if (error is PlatformException) {
+      final message = error.message?.trim();
+      if (message != null && message.isNotEmpty) {
+        return message;
+      }
+    }
+
+    final message = error.toString().trim();
+    if (message.isNotEmpty) {
+      return message;
+    }
+
+    return fallbackError;
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final workflowPhase = context.select<RecordingController, WorkflowPhase>(
+      (controller) => controller.phase,
+    );
 
     return AnimatedBuilder(
       animation: widget.controller.storage,
       builder: (context, _) {
         final storage = widget.controller.storage;
         final snapshot = storage.snapshot;
+        final canClearCachedRecordings =
+            snapshot != null &&
+            snapshot.recordingsBytes > 0 &&
+            workflowPhase == WorkflowPhase.idle &&
+            !_isRunningAction;
 
         return buildSectionPage(
           context,
@@ -129,8 +204,15 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
             ],
             if (_actionError != null) ...[
               AppInlineNotice(
-                message: l10n.storageActionFailed,
+                message: _actionError!,
                 variant: AppInlineNoticeVariant.error,
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_actionSuccess != null) ...[
+              AppInlineNotice(
+                message: _actionSuccess!,
+                variant: AppInlineNoticeVariant.success,
               ),
               const SizedBox(height: 16),
             ],
@@ -166,6 +248,22 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
                   recordingsColor: _recordingsColor,
                   tempColor: _tempColor,
                   logsColor: _logsColor,
+                  footer: Align(
+                    alignment: Alignment.centerLeft,
+                    child: AppButton(
+                      key: const Key('storage_clear_cached_recordings_button'),
+                      label: l10n.storageClearCachedRecordings,
+                      icon: CupertinoIcons.delete,
+                      variant: AppButtonVariant.secondary,
+                      onPressed: canClearCachedRecordings
+                          ? () {
+                              unawaited(
+                                _confirmAndClearCachedRecordings(context),
+                              );
+                            }
+                          : null,
+                    ),
+                  ),
                 ),
               ),
               if (_showDeveloperTools) ...[
@@ -187,14 +285,19 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
                         label: l10n.storageOpenRecordingsFolder,
                         icon: CupertinoIcons.folder,
                         variant: AppButtonVariant.secondary,
-                        onPressed: () =>
-                            _runAction(storage.revealRecordingsFolder),
+                        onPressed: () => _runAction(
+                          storage.revealRecordingsFolder,
+                          fallbackError: l10n.storageActionFailed,
+                        ),
                       ),
                       AppButton(
                         label: l10n.storageOpenTempFolder,
                         icon: CupertinoIcons.tray,
                         variant: AppButtonVariant.secondary,
-                        onPressed: () => _runAction(storage.revealTempFolder),
+                        onPressed: () => _runAction(
+                          storage.revealTempFolder,
+                          fallbackError: l10n.storageActionFailed,
+                        ),
                       ),
                     ],
                   ),
@@ -357,12 +460,14 @@ class _ClingfyStorageCard extends StatelessWidget {
     required this.recordingsColor,
     required this.tempColor,
     required this.logsColor,
+    this.footer,
   });
 
   final StorageSnapshot snapshot;
   final Color recordingsColor;
   final Color tempColor;
   final Color logsColor;
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -400,6 +505,7 @@ class _ClingfyStorageCard extends StatelessWidget {
           value: _formatBytes(snapshot.clingfyTotalBytes),
         ),
       ],
+      footer: footer,
     );
   }
 }
@@ -411,6 +517,7 @@ class _StorageDonutCard extends StatelessWidget {
     required this.centerValue,
     required this.centerLabel,
     required this.rows,
+    this.footer,
   });
 
   final Key chartKey;
@@ -418,6 +525,7 @@ class _StorageDonutCard extends StatelessWidget {
   final String centerValue;
   final String centerLabel;
   final List<Widget> rows;
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -437,6 +545,7 @@ class _StorageDonutCard extends StatelessWidget {
           if (index > 0) const SizedBox(height: 10),
           rows[index],
         ],
+        if (footer != null) ...[const SizedBox(height: 20), footer!],
       ],
     );
   }
