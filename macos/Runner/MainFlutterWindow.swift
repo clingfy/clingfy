@@ -293,6 +293,8 @@ class MainFlutterWindow: NSWindow {
 
       case "getCaptureDiagnostics":
         self.screenRecorder.getCaptureDiagnostics(result: result)
+      case "getStorageSnapshot":
+        self.screenRecorder.getStorageSnapshot(result: result)
 
       case "getDisplays":
         self.screenRecorder.getDisplays(result: result)
@@ -406,6 +408,32 @@ class MainFlutterWindow: NSWindow {
           result(
             FlutterError(
               code: "LOG_FILE_UNAVAILABLE", message: "Log storage directory is unavailable",
+              details: nil))
+        }
+
+      case "revealRecordingsFolder":
+        let url = AppPaths.recordingsRoot()
+        if FileManager.default.fileExists(atPath: url.path) {
+          NSWorkspace.shared.open(url)
+          result(nil)
+        } else {
+          result(
+            FlutterError(
+              code: "RECORDINGS_FOLDER_UNAVAILABLE",
+              message: "Recordings storage directory is unavailable",
+              details: nil))
+        }
+
+      case "revealTempFolder":
+        let url = AppPaths.tempRoot()
+        if FileManager.default.fileExists(atPath: url.path) {
+          NSWorkspace.shared.open(url)
+          result(nil)
+        } else {
+          result(
+            FlutterError(
+              code: "TEMP_FOLDER_UNAVAILABLE",
+              message: "Temporary storage directory is unavailable",
               details: nil))
         }
 

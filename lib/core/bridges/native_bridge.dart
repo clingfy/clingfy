@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:clingfy/core/bridges/native_method_channel.dart';
 import 'package:clingfy/app/infrastructure/logging/logger_service.dart';
 import 'package:clingfy/core/models/app_models.dart';
+import 'package:clingfy/core/models/storage_snapshot.dart';
 import 'package:flutter/foundation.dart';
 
 class NativeBridge {
@@ -332,6 +333,24 @@ class NativeBridge {
 
   Future<T?> invokeMethod<T>(String method, [dynamic arguments]) {
     return _nativeBridge.invokeMethod<T>(method, arguments);
+  }
+
+  Future<StorageSnapshot> getStorageSnapshot() async {
+    final raw = await _nativeBridge.invokeMethod<Map<dynamic, dynamic>>(
+      'getStorageSnapshot',
+    );
+    if (raw == null) {
+      throw StateError('Native storage snapshot returned null.');
+    }
+    return StorageSnapshot.fromMap(raw);
+  }
+
+  Future<void> revealRecordingsFolder() async {
+    await _nativeBridge.invokeMethod<void>('revealRecordingsFolder');
+  }
+
+  Future<void> revealTempFolder() async {
+    await _nativeBridge.invokeMethod<void>('revealTempFolder');
   }
 
   Future<void> previewOpen({
