@@ -29,6 +29,7 @@ class StartRecordingStorageDialog {
       barrierDismissible: false,
       showCloseButton: true,
       closeResult: StartRecordingStorageDecision.cancel,
+      closeButtonKey: const Key('storage_dialog_close'),
       primaryLabel: isBlocking ? l10n.openStorageSettings : l10n.recordAnyway,
       secondaryLabel: isBlocking ? null : l10n.openStorageSettings,
       primaryResult: isBlocking

@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:clingfy/app/permissions/widgets/start_recording_storage_dialog.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
 import 'package:clingfy/ui/platform/platform_kind.dart';
 import 'package:clingfy/ui/platform/widgets/app_button.dart';
@@ -62,6 +61,7 @@ class AppDialog {
     double? maxWidth,
     bool showCloseButton = false,
     T? closeResult,
+    Key? closeButtonKey,
   }) async {
     final body = content ?? const SizedBox.shrink();
     final l10n = AppLocalizations.of(context)!;
@@ -89,6 +89,7 @@ class AppDialog {
           onClosePressed: showCloseButton
               ? () => Navigator.of(ctx).pop(closeResult)
               : null,
+          closeButtonKey: closeButtonKey,
           maxWidth: maxWidth ?? 380,
         ),
       );
@@ -104,6 +105,7 @@ class AppDialog {
               Expanded(child: Text(title)),
               if (showCloseButton)
                 AppIconButton(
+                  key: closeButtonKey,
                   tooltip: l10n.cancel,
                   icon: CupertinoIcons.xmark,
                   onPressed: () => Navigator.of(ctx).pop(closeResult),
@@ -147,6 +149,7 @@ class AppDialog {
             Expanded(child: Text(title)),
             if (showCloseButton)
               AppIconButton(
+                key: closeButtonKey,
                 tooltip: l10n.cancel,
                 icon: CupertinoIcons.xmark,
                 onPressed: () => Navigator.of(ctx).pop(closeResult),
@@ -208,6 +211,7 @@ class _MacosDialogShell extends StatelessWidget {
     this.secondaryLabel,
     this.onSecondaryPressed,
     this.onClosePressed,
+    this.closeButtonKey,
   });
 
   final String title;
@@ -218,6 +222,7 @@ class _MacosDialogShell extends StatelessWidget {
   final VoidCallback? onSecondaryPressed;
   final VoidCallback? onClosePressed;
   final double maxWidth;
+  final Key? closeButtonKey;
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +312,7 @@ class _MacosDialogShell extends StatelessWidget {
                         if (secondaryLabel != null &&
                             onSecondaryPressed != null) ...[
                           Expanded(
-                            child: AppButton( 
+                            child: AppButton(
                               label: secondaryLabel!,
                               variant: AppButtonVariant.secondary,
                               onPressed: onSecondaryPressed,
@@ -333,7 +338,7 @@ class _MacosDialogShell extends StatelessWidget {
                   top: 10,
                   right: 10,
                   child: AppIconButton(
-                    key: const Key('dialog_close'),
+                    key: closeButtonKey ?? const Key('dialog_close'),
                     tooltip: AppLocalizations.of(context)!.cancel,
                     icon: CupertinoIcons.xmark,
                     onPressed: onClosePressed,

@@ -171,8 +171,8 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final workflowPhase = context.select<RecordingController, WorkflowPhase>(
-      (controller) => controller.phase,
+    final workflowPhase = context.select<RecordingController?, WorkflowPhase>(
+      (controller) => controller?.phase ?? WorkflowPhase.idle,
     );
 
     return AnimatedBuilder(
