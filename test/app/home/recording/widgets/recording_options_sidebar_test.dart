@@ -2,6 +2,7 @@ import 'package:clingfy/app/home/recording/widgets/recording_options_sidebar.dar
 import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/core/overlay/overlay_mode.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
+import 'package:clingfy/ui/platform/widgets/app_sidebar_tokens.dart';
 import 'package:clingfy/ui/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,7 +11,7 @@ import 'package:macos_ui/macos_ui.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Widget buildTestApp() {
+  Widget buildTestApp({int selectedIndex = 0}) {
     return MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
@@ -24,6 +25,7 @@ void main() {
             width: 960,
             child: RecordingOptionsSidebar(
               isRecording: false,
+              selectedIndex: selectedIndex,
               targetMode: DisplayTargetMode.explicitId,
               displays: const [],
               selectedDisplayId: null,
@@ -111,45 +113,113 @@ void main() {
     );
   }
 
-  testWidgets('dark sidebar uses the shared rail chrome and selected tile', (
+  testWidgets(
+    'options panel renders selected content without an embedded rail',
+    (tester) async {
+      await tester.pumpWidget(buildTestApp(selectedIndex: 0));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('recording_sidebar_rail')), findsNothing);
+      expect(find.byKey(const Key('recording_sidebar_header')), findsOneWidget);
+      expect(find.text('Screen & Audio'), findsOneWidget);
+      expect(find.text('Face Cam'), findsNothing);
+      expect(find.text('Output'), findsNothing);
+
+      await tester.pumpWidget(buildTestApp(selectedIndex: 1));
+
+      await tester.pumpAndSettle();
+
+      expect(find.text('Face Cam'), findsOneWidget);
+      expect(find.text('Output'), findsNothing);
+    },
+  );
+
+  testWidgets('standalone rail updates the selected tile on tap', (
     tester,
   ) async {
     final theme = buildDarkTheme();
+    var selectedIndex = 0;
 
-    await tester.pumpWidget(buildTestApp());
-    await tester.pumpAndSettle();
-
-    final railFinder = find.byKey(const Key('recording_sidebar_rail'));
-    final rail = tester.widget<Container>(railFinder);
-    final selectedTileDecoration = _decorationFor(
-      tester,
-      find.byKey(const ValueKey('recording_sidebar_rail_tile_0')),
-    );
-
-    expect(
-      tester.getSize(railFinder).width,
-      theme.appEditorChrome.editorRailWidth,
-    );
-    expect(
-      rail.color,
-      Color.alphaBlend(
-        theme.inputDecorationTheme.fillColor!.withValues(alpha: 0.18),
-        theme.colorScheme.surface,
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: theme,
+        darkTheme: theme,
+        themeMode: ThemeMode.dark,
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              return RecordingSidebarRail(
+                selectedIndex: selectedIndex,
+                onSelectedIndexChanged: (value) {
+                  setState(() => selectedIndex = value);
+                },
+              );
+            },
+          ),
+        ),
       ),
     );
-    expect(find.byKey(const Key('recording_sidebar_header')), findsOneWidget);
+
+    final selectedButtonBefore = tester.widget<IconButton>(
+      find.byKey(const ValueKey('recording_sidebar_rail_tile_0')),
+    );
+    expect(selectedButtonBefore.iconSize, 28);
+    expect(selectedButtonBefore.isSelected, isTrue);
     expect(
-      selectedTileDecoration.color,
-      theme.colorScheme.primary.withValues(alpha: 0.16),
+      selectedButtonBefore.style?.backgroundColor?.resolve({}),
+      Colors.transparent,
     );
     expect(
-      selectedTileDecoration.borderRadius,
-      BorderRadius.circular(theme.appEditorChrome.controlRadius + 2),
+      selectedButtonBefore.style?.foregroundColor?.resolve({
+        WidgetState.selected,
+      }),
+      theme.colorScheme.onSurface,
+    );
+    expect(find.text('Screen & Audio'), findsNothing);
+    expect(find.text('Face Cam'), findsNothing);
+    expect(find.text('Output'), findsNothing);
+    expect(
+      find.byTooltip(
+        AppLocalizations.of(tester.element(find.byType(Scaffold)))!.tabFaceCam,
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('recording_sidebar_rail_tile_1')),
+    );
+    await tester.pumpAndSettle();
+
+    final selectedButtonAfter = tester.widget<IconButton>(
+      find.byKey(const ValueKey('recording_sidebar_rail_tile_1')),
+    );
+    expect(selectedButtonAfter.iconSize, 28);
+    expect(selectedButtonAfter.isSelected, isTrue);
+    expect(
+      selectedButtonAfter.style?.foregroundColor?.resolve({
+        WidgetState.selected,
+      }),
+      theme.colorScheme.onSurface,
+    );
+    final semantics = tester.getSemantics(
+      find.byKey(const ValueKey('recording_sidebar_rail_tile_1')),
+    );
+    expect(
+      semantics.label,
+      AppLocalizations.of(tester.element(find.byType(Scaffold)))!.tabFaceCam,
     );
   });
-}
 
-BoxDecoration _decorationFor(WidgetTester tester, Finder finder) {
-  final container = tester.widget<Container>(finder);
-  return container.decoration! as BoxDecoration;
+  testWidgets('options panel uses a compact bottom spacer', (tester) async {
+    await tester.pumpWidget(buildTestApp(selectedIndex: 0));
+    await tester.pumpAndSettle();
+
+    final bottomSpacer = tester.widget<SizedBox>(
+      find.byKey(const Key('recording_sidebar_bottom_spacer')),
+    );
+
+    expect(bottomSpacer.height, AppSidebarTokens.rowGap);
+  });
 }

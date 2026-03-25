@@ -87,10 +87,9 @@ class PostZoomSection extends StatelessWidget {
     if (isMac()) return slider;
 
     return SliderTheme(
-      data: Theme.of(context).sliderTheme.copyWith(
-        activeTrackColor: accentColor,
-        thumbColor: accentColor,
-      ),
+      data: Theme.of(
+        context,
+      ).sliderTheme.copyWith(activeTrackColor: accentColor),
       child: slider,
     );
   }

@@ -11,6 +11,7 @@ import 'package:clingfy/l10n/app_localizations.dart';
 import 'package:clingfy/ui/platform/widgets/app_dialog.dart';
 import 'package:clingfy/ui/platform/widgets/app_button.dart';
 import 'package:clingfy/ui/platform/widgets/app_inline_notice.dart';
+import 'package:clingfy/ui/theme/app_theme.dart';
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +34,8 @@ class StorageSettingsSection extends StatefulWidget {
 }
 
 class _StorageSettingsSectionState extends State<StorageSettingsSection> {
+  static const _storageDetailCardsBreakpoint = 860.0;
+  static const _storageCardGap = 16.0;
   static const _systemUsedColor = Color(0xFF3F6DF6);
   static const _systemFreeColor = Color(0xFF24B47E);
   static const _recordingsColor = Color(0xFF3F6DF6);
@@ -223,47 +226,80 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
               ),
               const SizedBox(height: 16),
             ],
-            SettingsCard(
-              title: l10n.storageOverviewTitle,
-              subtitle: l10n.storageOverviewDescription,
-              child: _buildOverview(context, snapshot, storage.isLoading),
+            Container(
+              key: const Key('storage_overview_card'),
+              child: SettingsCard(
+                title: l10n.storageOverviewTitle,
+                subtitle: l10n.storageOverviewDescription,
+                child: _buildOverview(context, snapshot, storage.isLoading),
+              ),
             ),
             if (snapshot != null) ...[
               const SizedBox(height: 16),
-              SettingsCard(
-                title: l10n.storageSystemTitle,
-                subtitle: l10n.storageSystemDescription,
-                child: _SystemStorageCard(
-                  snapshot: snapshot,
-                  usedColor: _systemUsedColor,
-                  freeColor: _systemFreeColor,
-                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final systemCard = Container(
+                    key: const Key('storage_system_card'),
+                    child: SettingsCard(
+                      title: l10n.storageSystemTitle,
+                      subtitle: l10n.storageSystemDescription,
+                      child: _SystemStorageCard(
+                        snapshot: snapshot,
+                        usedColor: _systemUsedColor,
+                        freeColor: _systemFreeColor,
+                      ),
+                    ),
+                  );
+                  final clingfyCard = Container(
+                    key: const Key('storage_clingfy_card'),
+                    child: SettingsCard(
+                      title: l10n.storageClingfyTitle,
+                      subtitle: l10n.storageClingfyDescription,
+                      child: _ClingfyStorageCard(
+                        snapshot: snapshot,
+                        recordingsColor: _recordingsColor,
+                        tempColor: _tempColor,
+                        logsColor: _logsColor,
+                      ),
+                    ),
+                  );
+
+                  if (constraints.maxWidth >= _storageDetailCardsBreakpoint) {
+                    return Row(
+                      key: const Key('storage_detail_cards_row'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: systemCard),
+                        const SizedBox(width: _storageCardGap),
+                        Expanded(child: clingfyCard),
+                      ],
+                    );
+                  }
+
+                  return Column(
+                    key: const Key('storage_detail_cards_column'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      systemCard,
+                      const SizedBox(height: _storageCardGap),
+                      clingfyCard,
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 16),
-              SettingsCard(
-                title: l10n.storageClingfyTitle,
-                subtitle: l10n.storageClingfyDescription,
-                child: _ClingfyStorageCard(
-                  snapshot: snapshot,
-                  recordingsColor: _recordingsColor,
-                  tempColor: _tempColor,
-                  logsColor: _logsColor,
-                  footer: Align(
-                    alignment: Alignment.centerLeft,
-                    child: AppButton(
-                      key: const Key('storage_clear_cached_recordings_button'),
-                      label: l10n.storageClearCachedRecordings,
-                      icon: CupertinoIcons.delete,
-                      variant: AppButtonVariant.secondary,
-                      onPressed: canClearCachedRecordings
-                          ? () {
-                              unawaited(
-                                _confirmAndClearCachedRecordings(context),
-                              );
-                            }
-                          : null,
-                    ),
-                  ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: AppButton(
+                  key: const Key('storage_clear_cached_recordings_button'),
+                  label: l10n.storageClearCachedRecordings,
+                  icon: CupertinoIcons.delete,
+                  variant: AppButtonVariant.secondary,
+                  onPressed: canClearCachedRecordings
+                      ? () {
+                          unawaited(_confirmAndClearCachedRecordings(context));
+                        }
+                      : null,
                 ),
               ),
               if (_showDeveloperTools) ...[
@@ -460,14 +496,12 @@ class _ClingfyStorageCard extends StatelessWidget {
     required this.recordingsColor,
     required this.tempColor,
     required this.logsColor,
-    this.footer,
   });
 
   final StorageSnapshot snapshot;
   final Color recordingsColor;
   final Color tempColor;
   final Color logsColor;
-  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -505,7 +539,6 @@ class _ClingfyStorageCard extends StatelessWidget {
           value: _formatBytes(snapshot.clingfyTotalBytes),
         ),
       ],
-      footer: footer,
     );
   }
 }
@@ -517,7 +550,6 @@ class _StorageDonutCard extends StatelessWidget {
     required this.centerValue,
     required this.centerLabel,
     required this.rows,
-    this.footer,
   });
 
   final Key chartKey;
@@ -525,7 +557,6 @@ class _StorageDonutCard extends StatelessWidget {
   final String centerValue;
   final String centerLabel;
   final List<Widget> rows;
-  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -545,13 +576,17 @@ class _StorageDonutCard extends StatelessWidget {
           if (index > 0) const SizedBox(height: 10),
           rows[index],
         ],
-        if (footer != null) ...[const SizedBox(height: 20), footer!],
       ],
     );
   }
 }
 
 class _StorageDonutChart extends StatelessWidget {
+  static const double size = 220;
+  static const double ringThickness = 34;
+  static const double gapAngle = 0.028;
+  static const double hubInset = 18;
+
   const _StorageDonutChart({
     this.chartKey,
     required this.segments,
@@ -567,27 +602,48 @@ class _StorageDonutChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final chartBackgroundColor = theme.colorScheme.onSurface.withValues(
-      alpha: 0.08,
+      alpha: isDark ? 0.10 : 0.07,
+    );
+    final hubColor = isDark
+        ? theme.appTokens.previewPanelBackground.withValues(alpha: 0.94)
+        : theme.colorScheme.surface.withValues(alpha: 0.98);
+    final hubBorderColor = theme.colorScheme.onSurface.withValues(
+      alpha: isDark ? 0.06 : 0.04,
     );
     final labelColor = theme.textTheme.bodySmall?.color;
 
     return SizedBox(
       key: chartKey,
-      height: 204,
-      width: 204,
+      height: size,
+      width: size,
       child: Stack(
         alignment: Alignment.center,
         children: [
           CustomPaint(
-            size: const Size.square(204),
+            size: const Size.square(size),
             painter: _StorageDonutChartPainter(
               segments: segments,
               backgroundColor: chartBackgroundColor,
+              gapAngle: gapAngle,
+              strokeWidth: ringThickness,
+            ),
+          ),
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.all(hubInset),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: hubColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: hubBorderColor),
+                ),
+              ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 34),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -595,14 +651,18 @@ class _StorageDonutChart extends StatelessWidget {
                   centerValue,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleMedium?.copyWith(
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
                   centerLabel,
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(color: labelColor),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: labelColor,
+                    height: 1.25,
+                  ),
                 ),
               ],
             ),
@@ -617,14 +677,17 @@ class _StorageDonutChartPainter extends CustomPainter {
   const _StorageDonutChartPainter({
     required this.segments,
     required this.backgroundColor,
+    required this.gapAngle,
+    required this.strokeWidth,
   });
 
   final List<_StorageChartSegment> segments;
   final Color backgroundColor;
+  final double gapAngle;
+  final double strokeWidth;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final strokeWidth = size.shortestSide * 0.14;
     final radius = (size.shortestSide - strokeWidth) / 2;
     final rect = Rect.fromCircle(
       center: size.center(Offset.zero),
@@ -649,8 +712,9 @@ class _StorageDonutChartPainter extends CustomPainter {
       0,
       (sum, segment) => sum + segment.value,
     );
-    final gapAngle = visibleSegments.length > 1 ? 0.045 : 0.0;
-    final drawableSweep = (math.pi * 2) - (gapAngle * visibleSegments.length);
+    final resolvedGapAngle = visibleSegments.length > 1 ? gapAngle : 0.0;
+    final drawableSweep =
+        (math.pi * 2) - (resolvedGapAngle * visibleSegments.length);
     var startAngle = -math.pi / 2;
 
     for (final segment in visibleSegments) {
@@ -662,14 +726,16 @@ class _StorageDonutChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round;
 
       canvas.drawArc(rect, startAngle, math.max(sweep, 0.001), false, paint);
-      startAngle += sweep + gapAngle;
+      startAngle += sweep + resolvedGapAngle;
     }
   }
 
   @override
   bool shouldRepaint(covariant _StorageDonutChartPainter oldDelegate) {
     return oldDelegate.segments != segments ||
-        oldDelegate.backgroundColor != backgroundColor;
+        oldDelegate.backgroundColor != backgroundColor ||
+        oldDelegate.gapAngle != gapAngle ||
+        oldDelegate.strokeWidth != strokeWidth;
   }
 }
 

@@ -26,8 +26,11 @@ class SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Card(
+      color: isDark ? theme.appTokens.editorChromeBackground : null,
       elevation: 0,
+      surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
         side: BorderSide(color: theme.appTokens.panelBorder),

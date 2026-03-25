@@ -327,15 +327,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
     final rail = tester.widget<Container>(
       find.byKey(const Key('settings_nav_rail')),
     );
     final header = tester.widget<Container>(
       find.byKey(const Key('settings_header')),
     );
+    final content = tester.widget<Container>(
+      find.byKey(const Key('settings_content_surface')),
+    );
 
+    expect(scaffold.backgroundColor, theme.scaffoldBackgroundColor);
     expect(rail.color, theme.appTokens.panelBackground);
     expect(header.color, theme.appTokens.toolbarOverlay);
+    expect(content.color, Colors.transparent);
   });
 
   testWidgets('settings chrome uses semantic surfaces in dark mode', (
@@ -349,15 +355,23 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
     final rail = tester.widget<Container>(
       find.byKey(const Key('settings_nav_rail')),
     );
     final header = tester.widget<Container>(
       find.byKey(const Key('settings_header')),
     );
+    final content = tester.widget<Container>(
+      find.byKey(const Key('settings_content_surface')),
+    );
+    final card = tester.widget<Card>(find.byType(Card).first);
 
-    expect(rail.color, theme.appTokens.panelBackground);
-    expect(header.color, theme.appTokens.toolbarOverlay);
+    expect(scaffold.backgroundColor, theme.appTokens.outerBackground);
+    expect(rail.color, theme.appTokens.editorChromeBackground);
+    expect(header.color, theme.appTokens.editorChromeBackground);
+    expect(content.color, theme.appTokens.editorChromeBackground);
+    expect(card.color, theme.appTokens.editorChromeBackground);
   });
 
   testWidgets('/settings/storage route opens settings on Storage section', (

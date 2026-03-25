@@ -19,6 +19,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   Widget buildTestApp({
+    int selectedIndex = 0,
     bool enabled = true,
     bool cursorAvailable = true,
     bool hasAudio = true,
@@ -40,6 +41,7 @@ void main() {
         data: buildMacosTheme(Brightness.dark),
         child: Scaffold(
           body: PostProcessingSidebar(
+            selectedIndex: selectedIndex,
             isProcessing: false,
             enabled: enabled,
             layoutPreset: LayoutPreset.auto,
@@ -86,22 +88,99 @@ void main() {
     );
   }
 
-  testWidgets('renders rail tabs and switches tab content', (tester) async {
-    await tester.pumpWidget(buildTestApp());
+  testWidgets(
+    'options panel renders selected content without an embedded rail',
+    (tester) async {
+      await tester.pumpWidget(buildTestApp(selectedIndex: 0));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('post_sidebar_rail')), findsNothing);
+      expect(find.text('Layout Settings'), findsOneWidget);
+
+      await tester.pumpWidget(buildTestApp(selectedIndex: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('Effects Settings'), findsOneWidget);
+
+      await tester.pumpWidget(buildTestApp(selectedIndex: 2));
+      await tester.pumpAndSettle();
+      expect(find.text('Export Settings'), findsOneWidget);
+    },
+  );
+
+  testWidgets('standalone rail updates the selected tile on tap', (
+    tester,
+  ) async {
+    final theme = buildDarkTheme();
+    var selectedIndex = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: theme,
+        darkTheme: theme,
+        themeMode: ThemeMode.dark,
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              return PostProcessingSidebarRail(
+                selectedIndex: selectedIndex,
+                onSelectedIndexChanged: (value) {
+                  setState(() => selectedIndex = value);
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    final selectedButtonBefore = tester.widget<IconButton>(
+      find.byKey(const ValueKey('post_sidebar_rail_tile_0')),
+    );
+    expect(selectedButtonBefore.iconSize, 28);
+    expect(selectedButtonBefore.isSelected, isTrue);
+    expect(
+      selectedButtonBefore.style?.backgroundColor?.resolve({}),
+      Colors.transparent,
+    );
+    expect(
+      selectedButtonBefore.style?.foregroundColor?.resolve({
+        WidgetState.selected,
+      }),
+      theme.colorScheme.onSurface,
+    );
+    expect(find.text('Layout'), findsNothing);
+    expect(find.text('Effects'), findsNothing);
+    expect(find.text('Export'), findsNothing);
+    expect(
+      find.byTooltip(
+        AppLocalizations.of(tester.element(find.byType(Scaffold)))!.effects,
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('post_sidebar_rail_tile_1')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Layout'), findsWidgets);
-    expect(find.text('Effects'), findsWidgets);
-    expect(find.text('Export'), findsWidgets);
-    expect(find.text('Layout Settings'), findsOneWidget);
-
-    await tester.tap(find.text('Effects').first);
-    await tester.pumpAndSettle();
-    expect(find.text('Effects Settings'), findsOneWidget);
-
-    await tester.tap(find.text('Export').first);
-    await tester.pumpAndSettle();
-    expect(find.text('Export Settings'), findsOneWidget);
+    final selectedButtonAfter = tester.widget<IconButton>(
+      find.byKey(const ValueKey('post_sidebar_rail_tile_1')),
+    );
+    expect(selectedButtonAfter.iconSize, 28);
+    expect(selectedButtonAfter.isSelected, isTrue);
+    expect(
+      selectedButtonAfter.style?.foregroundColor?.resolve({
+        WidgetState.selected,
+      }),
+      theme.colorScheme.onSurface,
+    );
+    final semantics = tester.getSemantics(
+      find.byKey(const ValueKey('post_sidebar_rail_tile_1')),
+    );
+    expect(
+      semantics.label,
+      AppLocalizations.of(tester.element(find.byType(Scaffold)))!.effects,
+    );
   });
 
   testWidgets('layout tab uses app section and slider primitives', (
@@ -155,11 +234,13 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      buildTestApp(cursorAvailable: false, hasAudio: false, showCursor: true),
+      buildTestApp(
+        selectedIndex: 1,
+        cursorAvailable: false,
+        hasAudio: false,
+        showCursor: true,
+      ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Effects').first);
     await tester.pumpAndSettle();
 
     expect(find.byType(AppInlineNotice), findsNWidgets(2));
@@ -168,10 +249,9 @@ void main() {
   });
 
   testWidgets('export tab only shows normalization controls', (tester) async {
-    await tester.pumpWidget(buildTestApp(autoNormalizeOnExport: false));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Export').first);
+    await tester.pumpWidget(
+      buildTestApp(selectedIndex: 2, autoNormalizeOnExport: false),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Format'), findsNothing);
@@ -180,10 +260,9 @@ void main() {
     expect(find.text('Auto-normalize on export'), findsOneWidget);
     expect(find.text('Target loudness'), findsNothing);
 
-    await tester.pumpWidget(buildTestApp(autoNormalizeOnExport: true));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Export').first);
+    await tester.pumpWidget(
+      buildTestApp(selectedIndex: 2, autoNormalizeOnExport: true),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Format'), findsNothing);
@@ -200,14 +279,12 @@ void main() {
 
     await tester.pumpWidget(
       buildTestApp(
+        selectedIndex: 1,
         zoomFactor: 1.0,
         onZoomFactorChanged: changed.add,
         onZoomFactorChangeEnd: ended.add,
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Effects').first);
     await tester.pumpAndSettle();
 
     final toggleRows = find.byType(AppToggleRow);
@@ -224,14 +301,12 @@ void main() {
 
     await tester.pumpWidget(
       buildTestApp(
+        selectedIndex: 1,
         zoomFactor: 2.0,
         onZoomFactorChanged: changed.add,
         onZoomFactorChangeEnd: ended.add,
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Effects').first);
     await tester.pumpAndSettle();
 
     final zoomToggleEnabled = tester.widget<AppToggleRow>(
@@ -260,42 +335,6 @@ void main() {
     expect(blockedIgnorePointer, findsOneWidget);
   });
 
-  testWidgets('dark sidebar uses the shared rail chrome and selected tile', (
-    tester,
-  ) async {
-    final theme = buildDarkTheme();
-
-    await tester.pumpWidget(buildTestApp());
-    await tester.pumpAndSettle();
-
-    final railFinder = find.byKey(const Key('post_sidebar_rail'));
-    final rail = tester.widget<Container>(railFinder);
-    final selectedTileDecoration = _decorationFor(
-      tester,
-      find.byKey(const ValueKey('post_sidebar_rail_tile_0')),
-    );
-
-    expect(
-      tester.getSize(railFinder).width,
-      theme.appEditorChrome.editorRailWidth,
-    );
-    expect(
-      rail.color,
-      Color.alphaBlend(
-        theme.inputDecorationTheme.fillColor!.withValues(alpha: 0.18),
-        theme.colorScheme.surface,
-      ),
-    );
-    expect(
-      selectedTileDecoration.color,
-      theme.colorScheme.primary.withValues(alpha: 0.16),
-    );
-    expect(
-      selectedTileDecoration.borderRadius,
-      BorderRadius.circular(theme.appEditorChrome.controlRadius + 2),
-    );
-  });
-
   testWidgets('background color picker dialog opens without overflow', (
     tester,
   ) async {
@@ -308,9 +347,4 @@ void main() {
     expect(find.byType(ColorPicker), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
-}
-
-BoxDecoration _decorationFor(WidgetTester tester, Finder finder) {
-  final container = tester.widget<Container>(finder);
-  return container.decoration! as BoxDecoration;
 }
