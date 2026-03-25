@@ -55,7 +55,7 @@ void main() {
     }
 
     final slider = tester.widget<MacosSlider>(find.byType(MacosSlider));
-    expect(slider.backgroundColor.value, const Color(0xFF2A2D35).value);
+    expect(slider.backgroundColor.toARGB32(), const Color(0xFF2A2D35).toARGB32());
   });
 
   testWidgets('AppSlider emits change and end callbacks from pointer input', (
