@@ -93,6 +93,9 @@ class HomeBindings {
 
     HardwareKeyboard.instance.addHandler(_handleKeyDebug);
 
+    nativeBridge.setOnIndicatorPauseTapped(() {
+      unawaited(recordingController.pauseRecording());
+    });
     nativeBridge.setOnIndicatorStopTapped(() {
       onToggleRecording();
     });
@@ -129,6 +132,7 @@ class HomeBindings {
     settingsController.removeListener(onUpdateNativeBarState);
     nativeBridge.isUpdateAvailable.removeListener(onUpdateNativeBarState);
 
+    nativeBridge.setOnIndicatorPauseTapped(null);
     nativeBridge.setOnIndicatorStopTapped(null);
     nativeBridge.setOnIndicatorResumeTapped(null);
     nativeBridge.setOnMenuBarToggleRequest(null);

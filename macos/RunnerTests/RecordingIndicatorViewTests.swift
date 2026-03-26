@@ -18,13 +18,14 @@ final class RecordingIndicatorViewTests: XCTestCase {
     return view
   }
 
-  func testRecordingStateShowsPrimaryStopOnly() {
+  func testRecordingStateShowsPrimaryPauseAndSecondaryStop() {
     let view = makeView(state: .recording)
 
     XCTAssertFalse(view.debugPrimaryHitRect.isEmpty)
-    XCTAssertTrue(view.debugSecondaryStopHitRect.isEmpty)
+    XCTAssertFalse(view.debugSecondaryStopHitRect.isEmpty)
     XCTAssertEqual(view.debugDisplayedElapsedText, "00:12:34")
-    XCTAssertEqual(view.debugPrimaryTooltip, "Stop recording")
+    XCTAssertEqual(view.debugPrimaryTooltip, "Pause recording")
+    XCTAssertEqual(view.debugSecondaryTooltip, "Stop recording")
     XCTAssertTrue(view.debugHasTickTimer)
   }
 
@@ -48,12 +49,21 @@ final class RecordingIndicatorViewTests: XCTestCase {
     XCTAssertFalse(view.debugHasTickTimer)
   }
 
-  func testRecordingPrimaryClickTriggersStop() {
+  func testRecordingPrimaryClickTriggersPause() {
+    let view = makeView(state: .recording)
+    var pauseTapped = 0
+    view.onPauseTapped = { pauseTapped += 1 }
+
+    XCTAssertTrue(view.debugHandleClick(at: center(of: view.debugPrimaryHitRect)))
+    XCTAssertEqual(pauseTapped, 1)
+  }
+
+  func testRecordingSecondaryStopClickTriggersStop() {
     let view = makeView(state: .recording)
     var stopTapped = 0
     view.onStopTapped = { stopTapped += 1 }
 
-    XCTAssertTrue(view.debugHandleClick(at: center(of: view.debugPrimaryHitRect)))
+    XCTAssertTrue(view.debugHandleClick(at: center(of: view.debugSecondaryStopHitRect)))
     XCTAssertEqual(stopTapped, 1)
   }
 
@@ -78,7 +88,9 @@ final class RecordingIndicatorViewTests: XCTestCase {
   func testFacadeMapsPausedStateToPausedIndicatorAndWiresCallbacks() {
     let facade = ScreenRecorderFacade()
     var stopTapped = 0
+    var pauseTapped = 0
     var resumeTapped = 0
+    facade.onIndicatorPauseTapped = { pauseTapped += 1 }
     facade.onIndicatorStopTapped = { stopTapped += 1 }
     facade.onIndicatorResumeTapped = { resumeTapped += 1 }
     facade._testSetRecorderState(.paused)
@@ -87,12 +99,15 @@ final class RecordingIndicatorViewTests: XCTestCase {
 
     let configuration = facade._testIndicatorConfiguration()
     XCTAssertEqual(configuration.state, .paused)
+    XCTAssertNotNil(configuration.onPauseTapped)
     XCTAssertNotNil(configuration.onStopTapped)
     XCTAssertNotNil(configuration.onResumeTapped)
 
+    configuration.onPauseTapped?()
     configuration.onResumeTapped?()
     configuration.onStopTapped?()
 
+    XCTAssertEqual(pauseTapped, 1)
     XCTAssertEqual(resumeTapped, 1)
     XCTAssertEqual(stopTapped, 1)
   }

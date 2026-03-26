@@ -936,6 +936,9 @@ class MainFlutterWindow: NSWindow {
         isLow: sample.isLow
       )
     }
+    screenRecorder.onIndicatorPauseTapped = { [weak self] in
+      self?.channel?.invokeMethod(NativeToFlutterMethod.indicatorPauseTapped, arguments: nil)
+    }
     screenRecorder.onIndicatorStopTapped = { [weak self] in
       self?.channel?.invokeMethod(NativeToFlutterMethod.indicatorStopTapped, arguments: nil)
     }

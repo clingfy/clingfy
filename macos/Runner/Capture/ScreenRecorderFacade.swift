@@ -596,6 +596,7 @@ protocol RecordingIndicatorManaging: AnyObject {
 final class ScreenRecorderFacade: NSObject {
   private struct IndicatorConfiguration {
     let state: IndicatorState
+    let onPauseTapped: (() -> Void)?
     let onStopTapped: (() -> Void)?
     let onResumeTapped: (() -> Void)?
     let elapsedProvider: (() -> String)?
@@ -645,6 +646,7 @@ final class ScreenRecorderFacade: NSObject {
   // events out
   var onDevicesChanged: (() -> Void)?
   var onVideoDevicesChanged: (() -> Void)?
+  var onIndicatorPauseTapped: (() -> Void)?
   var onIndicatorStopTapped: (() -> Void)?
   var onIndicatorResumeTapped: (() -> Void)?
   var onRecordingStateChanged: ((Bool) -> Void)?
@@ -2309,6 +2311,7 @@ final class ScreenRecorderFacade: NSObject {
     indicator.setState(
       configuration.state,
       pinned: prefs.indicatorPinned,
+      onPauseTapped: configuration.onPauseTapped,
       onStopTapped: configuration.onStopTapped,
       onResumeTapped: configuration.onResumeTapped,
       elapsedProvider: configuration.elapsedProvider
@@ -2318,6 +2321,9 @@ final class ScreenRecorderFacade: NSObject {
   private func makeIndicatorConfiguration() -> IndicatorConfiguration {
     IndicatorConfiguration(
       state: currentIndicatorState(),
+      onPauseTapped: capture.canPauseResume
+        ? { [weak self] in self?.onIndicatorPauseTapped?() }
+        : nil,
       onStopTapped: { [weak self] in self?.onIndicatorStopTapped?() },
       onResumeTapped: { [weak self] in self?.onIndicatorResumeTapped?() },
       elapsedProvider: { [weak self] in self?.formattedElapsed() ?? "00:00:00" }
@@ -2340,6 +2346,7 @@ final class ScreenRecorderFacade: NSObject {
 #if DEBUG
   struct IndicatorDebugConfiguration {
     let state: IndicatorState
+    let onPauseTapped: (() -> Void)?
     let onStopTapped: (() -> Void)?
     let onResumeTapped: (() -> Void)?
   }
@@ -2356,6 +2363,7 @@ final class ScreenRecorderFacade: NSObject {
     let configuration = makeIndicatorConfiguration()
     return IndicatorDebugConfiguration(
       state: configuration.state,
+      onPauseTapped: configuration.onPauseTapped,
       onStopTapped: configuration.onStopTapped,
       onResumeTapped: configuration.onResumeTapped
     )

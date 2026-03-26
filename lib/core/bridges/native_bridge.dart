@@ -16,6 +16,7 @@ class NativeBridge {
   /// Whether an app update has been found by Sparkle.
   final ValueNotifier<bool> isUpdateAvailable = ValueNotifier(false);
 
+  VoidCallback? _onIndicatorPauseTapped;
   VoidCallback? _onIndicatorStopTapped;
   VoidCallback? _onIndicatorResumeTapped;
   ValueChanged<double>? _onExportProgress;
@@ -67,6 +68,10 @@ class NativeBridge {
   Stream<Map<String, dynamic>> get workflowEvents => _workflowEventStream;
   Stream<Map<String, dynamic>> get playerEvents => _playerEventStream;
 
+  void setOnIndicatorPauseTapped(VoidCallback? cb) {
+    _onIndicatorPauseTapped = cb;
+  }
+
   void setOnIndicatorStopTapped(VoidCallback? cb) {
     _onIndicatorStopTapped = cb;
   }
@@ -114,6 +119,9 @@ class NativeBridge {
         if (args is Map) {
           Log.nativeEvent(args.cast<String, dynamic>());
         }
+        return null;
+      case NativeToFlutterMethod.indicatorPauseTapped:
+        _onIndicatorPauseTapped?.call();
         return null;
       case NativeToFlutterMethod.indicatorStopTapped:
         _onIndicatorStopTapped?.call();

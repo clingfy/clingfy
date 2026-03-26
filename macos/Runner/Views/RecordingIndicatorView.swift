@@ -9,7 +9,7 @@ enum IndicatorState: Equatable {
 
 private enum PrimarySymbolMode {
   case none
-  case stop
+  case pause
   case resume
 }
 
@@ -25,7 +25,7 @@ private struct IndicatorPresentation {
 }
 
 final class RecordingIndicatorView: NSView {
-  static let preferredSize = NSSize(width: 176, height: 42)
+  static let preferredSize = NSSize(width: 192, height: 42)
   private static let defaultElapsedText = "00:00:00"
 
   private enum ToolTipRegion: Int {
@@ -47,6 +47,7 @@ final class RecordingIndicatorView: NSView {
   private let stoppingLabel = CATextLayer()
 
   var elapsedProvider: (() -> String)?
+  var onPauseTapped: (() -> Void)?
   var onStopTapped: (() -> Void)?
   var onResumeTapped: (() -> Void)?
 
@@ -78,10 +79,10 @@ final class RecordingIndicatorView: NSView {
     primaryActionLayer.addSublayer(primarySymbolLayer)
     layer?.addSublayer(primaryActionLayer)
 
-    secondaryStopLayer.fillColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.18).cgColor
-    secondaryStopLayer.strokeColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
-    secondaryStopLayer.lineWidth = 1
-    secondaryStopSymbolLayer.fillColor = NSColor.labelColor.withAlphaComponent(0.9).cgColor
+    secondaryStopLayer.fillColor = NSColor.systemRed.cgColor
+    secondaryStopLayer.strokeColor = nil
+    secondaryStopLayer.lineWidth = 0
+    secondaryStopSymbolLayer.fillColor = NSColor.white.cgColor
     secondaryStopSymbolLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
     secondaryStopLayer.addSublayer(secondaryStopSymbolLayer)
     layer?.addSublayer(secondaryStopLayer)
@@ -138,6 +139,8 @@ final class RecordingIndicatorView: NSView {
     guard let containerLayer = layer else { return }
 
     let presentation = Self.presentation(for: state)
+    let showsPrimaryAction = presentation.showsPrimaryAction && isPrimaryActionAvailable
+    let showsSecondaryStop = presentation.showsSecondaryStop && isSecondaryStopAvailable
     let height = bounds.height
     containerLayer.cornerRadius = height / 2
 
@@ -163,7 +166,7 @@ final class RecordingIndicatorView: NSView {
     let lineHeight: CGFloat = 17
     let secondaryFrame: CGRect
     let textMaxX: CGFloat
-    if presentation.showsSecondaryStop {
+    if showsSecondaryStop {
       secondaryFrame = CGRect(
         x: bounds.width - horizontalInset - secondarySize,
         y: (height - secondarySize) / 2,
@@ -207,10 +210,10 @@ final class RecordingIndicatorView: NSView {
       height: lineHeight
     )
 
-    primaryHitRect = presentation.showsPrimaryAction
+    primaryHitRect = showsPrimaryAction
       ? primaryFrame.insetBy(dx: -8, dy: -8)
       : .zero
-    secondaryStopHitRect = presentation.showsSecondaryStop
+    secondaryStopHitRect = showsSecondaryStop
       ? secondaryFrame.insetBy(dx: -8, dy: -8)
       : .zero
 
@@ -260,7 +263,7 @@ final class RecordingIndicatorView: NSView {
     case .hidden:
       return nil
     case .recording:
-      return "Press to stop recording."
+      return "Primary action pauses recording. Secondary stop control stops recording."
     case .paused:
       return "Primary action resumes recording. Secondary stop control stops recording."
     case .stopping:
@@ -271,10 +274,12 @@ final class RecordingIndicatorView: NSView {
   override func accessibilityPerformPress() -> Bool {
     switch state {
     case .recording:
-      onStopTapped?()
+      guard let onPauseTapped else { return false }
+      onPauseTapped()
       return true
     case .paused:
-      onResumeTapped?()
+      guard let onResumeTapped else { return false }
+      onResumeTapped()
       return true
     case .hidden, .stopping:
       return false
@@ -292,12 +297,15 @@ final class RecordingIndicatorView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
 
-    primaryActionLayer.opacity = presentation.showsPrimaryAction ? 1 : 0
-    primarySymbolLayer.opacity = presentation.showsPrimaryAction ? 1 : 0
+    let showsPrimaryAction = presentation.showsPrimaryAction && isPrimaryActionAvailable
+    let showsSecondaryStop = presentation.showsSecondaryStop && isSecondaryStopAvailable
+
+    primaryActionLayer.opacity = showsPrimaryAction ? 1 : 0
+    primarySymbolLayer.opacity = showsPrimaryAction ? 1 : 0
     primaryActionLayer.fillColor = presentation.primaryTint.cgColor
 
-    secondaryStopLayer.opacity = presentation.showsSecondaryStop ? 1 : 0
-    secondaryStopSymbolLayer.opacity = presentation.showsSecondaryStop ? 1 : 0
+    secondaryStopLayer.opacity = showsSecondaryStop ? 1 : 0
+    secondaryStopSymbolLayer.opacity = showsSecondaryStop ? 1 : 0
 
     elapsedLabel.opacity = presentation.showsElapsed ? 1 : 0
     stoppingLabel.opacity = presentation.showsStopping ? 1 : 0
@@ -354,6 +362,26 @@ final class RecordingIndicatorView: NSView {
     return text.isEmpty ? Self.defaultElapsedText : text
   }
 
+  private var isPrimaryActionAvailable: Bool {
+    switch state {
+    case .recording:
+      return onPauseTapped != nil
+    case .paused:
+      return onResumeTapped != nil
+    case .hidden, .stopping:
+      return false
+    }
+  }
+
+  private var isSecondaryStopAvailable: Bool {
+    switch state {
+    case .recording, .paused:
+      return onStopTapped != nil
+    case .hidden, .stopping:
+      return false
+    }
+  }
+
   @discardableResult
   private func handleClick(at point: CGPoint) -> Bool {
     guard let tapTarget = tapTarget(at: point) else { return false }
@@ -378,14 +406,14 @@ final class RecordingIndicatorView: NSView {
       animateTap(on: primaryActionLayer)
       switch state {
       case .recording:
-        onStopTapped?()
+        onPauseTapped?()
       case .paused:
         onResumeTapped?()
       case .hidden, .stopping:
         break
       }
     case .secondaryStop:
-      guard state == .paused else { return }
+      guard state == .recording || state == .paused else { return }
       animateTap(on: secondaryStopLayer)
       onStopTapped?()
     }
@@ -447,18 +475,18 @@ final class RecordingIndicatorView: NSView {
       )
     case .recording:
       return IndicatorPresentation(
-        primaryTint: .systemRed,
-        primarySymbolMode: .stop,
+        primaryTint: .controlAccentColor,
+        primarySymbolMode: .pause,
         showsPrimaryAction: true,
         showsElapsed: true,
         showsStopping: false,
-        showsSecondaryStop: false,
-        primaryTooltip: "Stop recording",
-        secondaryStopTooltip: nil
+        showsSecondaryStop: true,
+        primaryTooltip: "Pause recording",
+        secondaryStopTooltip: "Stop recording"
       )
     case .paused:
       return IndicatorPresentation(
-        primaryTint: .systemOrange,
+        primaryTint: .controlAccentColor,
         primarySymbolMode: .resume,
         showsPrimaryAction: true,
         showsElapsed: true,
@@ -485,11 +513,39 @@ final class RecordingIndicatorView: NSView {
     switch mode {
     case .none:
       return nil
-    case .stop:
-      return stopSymbolPath(in: bounds)
+    case .pause:
+      return pauseSymbolPath(in: bounds)
     case .resume:
       return resumeSymbolPath(in: bounds)
     }
+  }
+
+  private static func pauseSymbolPath(in bounds: CGRect) -> CGPath {
+    let width = min(bounds.width, 9)
+    let height = min(bounds.height, 10)
+    let barWidth: CGFloat = min(3, width / 3)
+    let gap: CGFloat = 2.5
+    let totalWidth = barWidth * 2 + gap
+    let originX = bounds.midX - totalWidth / 2
+    let originY = bounds.midY - height / 2
+
+    let path = CGMutablePath()
+    path.addRoundedRect(
+      in: CGRect(x: originX, y: originY, width: barWidth, height: height),
+      cornerWidth: 1,
+      cornerHeight: 1
+    )
+    path.addRoundedRect(
+      in: CGRect(
+        x: originX + barWidth + gap,
+        y: originY,
+        width: barWidth,
+        height: height
+      ),
+      cornerWidth: 1,
+      cornerHeight: 1
+    )
+    return path
   }
 
   private static func stopSymbolPath(in bounds: CGRect) -> CGPath {
@@ -568,6 +624,7 @@ final class RecordingIndicator {
   func setState(
     _ state: IndicatorState,
     pinned: Bool,
+    onPauseTapped: (() -> Void)? = nil,
     onStopTapped: (() -> Void)? = nil,
     onResumeTapped: (() -> Void)? = nil,
     elapsedProvider: (() -> String)? = nil
@@ -581,6 +638,7 @@ final class RecordingIndicator {
 
     showIfNeeded()
     indicatorView?.elapsedProvider = elapsedProvider
+    indicatorView?.onPauseTapped = onPauseTapped
     indicatorView?.onStopTapped = onStopTapped
     indicatorView?.onResumeTapped = onResumeTapped
     indicatorView?.state = state
@@ -593,12 +651,14 @@ final class RecordingIndicator {
   func update(
     pinned: Bool,
     isRecording: Bool,
+    onPauseTapped: (() -> Void)? = nil,
     onStopTapped: (() -> Void)? = nil,
     elapsedProvider: @escaping () -> String
   ) {
     setState(
       isRecording ? .recording : .hidden,
       pinned: pinned,
+      onPauseTapped: onPauseTapped,
       onStopTapped: onStopTapped,
       elapsedProvider: elapsedProvider
     )
