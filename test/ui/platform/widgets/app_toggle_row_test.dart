@@ -21,12 +21,6 @@ void main() {
     );
   }
 
-  Finder findMacosTooltip(String message) {
-    return find.byWidgetPredicate(
-      (widget) => widget is MacosTooltip && widget.message == message,
-    );
-  }
-
   Finder findSwitchPadding() {
     return find.byWidgetPredicate(
       (widget) => widget is Padding && widget.child is PlatformSwitch,
@@ -48,7 +42,7 @@ void main() {
       );
 
       expect(find.text('Show cursor'), findsOneWidget);
-      expect(findMacosTooltip('Toggle cursor visibility'), findsOneWidget);
+      expect(find.byTooltip('Toggle cursor visibility'), findsOneWidget);
       expect(find.text('Toggle cursor visibility'), findsNothing);
 
       final switchPadding = tester.widget<Padding>(findSwitchPadding());

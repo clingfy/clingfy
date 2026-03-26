@@ -108,12 +108,6 @@ void main() {
     );
   }
 
-  Finder findMacosTooltip(String message) {
-    return find.byWidgetPredicate(
-      (widget) => widget is MacosTooltip && widget.message == message,
-    );
-  }
-
   testWidgets('settings rail renders seven sections', (tester) async {
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
 
@@ -252,7 +246,7 @@ void main() {
     expect(find.byType(AboutSettingsSection), findsOneWidget);
   });
 
-  testWidgets('settings cards expose help text as inline macOS tooltips', (
+  testWidgets('settings cards expose help text as inline tooltips', (
     tester,
   ) async {
     final settings = SettingsController(nativeBridge: NativeBridge.instance);
@@ -260,10 +254,7 @@ void main() {
     await tester.pumpWidget(buildTestApp(settings: settings));
     await tester.pumpAndSettle();
 
-    expect(
-      findMacosTooltip('Choose your preferred appearance'),
-      findsOneWidget,
-    );
+    expect(find.byTooltip('Choose your preferred appearance'), findsOneWidget);
     expect(find.text('Choose your preferred appearance'), findsNothing);
 
     await tester.drag(
@@ -275,7 +266,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      findMacosTooltip(
+      find.byTooltip(
         'Show a confirmation before closing the current recording if it has not been exported yet.',
       ),
       findsOneWidget,
@@ -290,7 +281,7 @@ void main() {
     await tester.tap(find.text('Storage'));
     await tester.pumpAndSettle();
     expect(
-      findMacosTooltip(
+      find.byTooltip(
         'Monitor system free space and Clingfy workspace usage to avoid failed recordings.',
       ),
       findsOneWidget,
@@ -305,14 +296,14 @@ void main() {
     await tester.tap(find.text('License'));
     await tester.pumpAndSettle();
     expect(
-      findMacosTooltip('Your current plan, entitlement, and update coverage.'),
+      find.byTooltip('Your current plan, entitlement, and update coverage.'),
       findsOneWidget,
     );
 
     await tester.tap(find.text('Permissions'));
     await tester.pumpAndSettle();
     expect(
-      findMacosTooltip(
+      find.byTooltip(
         'Review which permissions Clingfy can use and jump directly to the relevant System Settings pane.',
       ),
       findsOneWidget,
@@ -321,7 +312,7 @@ void main() {
     await tester.tap(find.text('Diagnostics'));
     await tester.pumpAndSettle();
     expect(
-      findMacosTooltip(
+      find.byTooltip(
         'If something goes wrong, open the logs folder and send today\'s log file to support.',
       ),
       findsOneWidget,

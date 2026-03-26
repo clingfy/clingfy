@@ -12,7 +12,12 @@ import 'package:macos_ui/macos_ui.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Widget buildTestApp({int selectedIndex = 0}) {
+  Widget buildTestApp({
+    int selectedIndex = 0,
+    bool isRecording = false,
+    DisplayTargetMode targetMode = DisplayTargetMode.explicitId,
+    bool cursorEnabled = false,
+  }) {
     return MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
@@ -25,9 +30,9 @@ void main() {
           body: SizedBox(
             width: 960,
             child: RecordingOptionsSidebar(
-              isRecording: false,
+              isRecording: isRecording,
               selectedIndex: selectedIndex,
-              targetMode: DisplayTargetMode.explicitId,
+              targetMode: targetMode,
               displays: const [],
               selectedDisplayId: null,
               appWindows: const [],
@@ -78,7 +83,7 @@ void main() {
               overlayUseCustomPosition: false,
               overlayRoundness: 0.5,
               indicatorPinned: false,
-              cursorEnabled: false,
+              cursorEnabled: cursorEnabled,
               cursorLinkedToRecording: true,
               onOverlayModeChanged: (_) {},
               onOverlayShapeChanged: (_) {},
@@ -313,5 +318,49 @@ void main() {
       captureSettingsGapAfterDivider.height,
       AppSidebarTokens.optionsGroupGap,
     );
+  });
+
+  testWidgets(
+    'screen tab exposes cursor hint as a conditional inline tooltip',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTestApp(selectedIndex: 0, cursorEnabled: true),
+      );
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(
+        tester.element(find.byType(RecordingOptionsSidebar)),
+      )!;
+
+      expect(find.byTooltip(l10n.cursorHint), findsOneWidget);
+      expect(find.text(l10n.cursorHint), findsNothing);
+
+      await tester.pumpWidget(
+        buildTestApp(selectedIndex: 0, cursorEnabled: true, isRecording: true),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip(l10n.cursorHint), findsNothing);
+    },
+  );
+
+  testWidgets('screen tab exposes area recording helper as a section tooltip', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTestApp(
+        selectedIndex: 0,
+        targetMode: DisplayTargetMode.areaRecording,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final l10n = AppLocalizations.of(
+      tester.element(find.byType(RecordingOptionsSidebar)),
+    )!;
+
+    expect(find.byTooltip(l10n.areaRecordingHelper), findsOneWidget);
+    expect(find.text(l10n.areaRecordingHelper), findsNothing);
+    expect(find.text(l10n.noAreaSelected), findsOneWidget);
   });
 }

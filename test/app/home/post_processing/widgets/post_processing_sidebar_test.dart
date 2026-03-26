@@ -89,12 +89,6 @@ void main() {
     );
   }
 
-  Finder findMacosTooltip(String message) {
-    return find.byWidgetPredicate(
-      (widget) => widget is MacosTooltip && widget.message == message,
-    );
-  }
-
   testWidgets(
     'options panel renders selected content without an embedded rail',
     (tester) async {
@@ -261,9 +255,9 @@ void main() {
     await tester.pumpWidget(buildTestApp(selectedIndex: 1));
     await tester.pumpAndSettle();
 
-    expect(findMacosTooltip('Toggle cursor visibility'), findsOneWidget);
+    expect(find.byTooltip('Toggle cursor visibility'), findsOneWidget);
     expect(find.text('Toggle cursor visibility'), findsNothing);
-    expect(findMacosTooltip('Manage zoom in effects'), findsOneWidget);
+    expect(find.byTooltip('Manage zoom in effects'), findsOneWidget);
     expect(find.text('Manage zoom in effects'), findsNothing);
   });
 

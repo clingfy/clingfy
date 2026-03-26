@@ -364,7 +364,6 @@ class RecordingOptionsSidebar extends StatelessWidget {
   List<Widget> _buildScreenTab(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
-    final helperStyle = AppSidebarTokens.helperStyle(theme);
 
     return [
       RecordingSourceSection(
@@ -411,6 +410,10 @@ class RecordingOptionsSidebar extends StatelessWidget {
         children: [
           AppFormRow(
             label: l10n.cursorHighlightVisibility,
+            infoTooltip:
+                cursorEnabled && cursorLinkedToRecording && !isRecording
+                ? l10n.cursorHint
+                : null,
             control: _buildSegmentedControl(
               mode: cursorEnabled
                   ? (cursorLinkedToRecording
@@ -419,17 +422,6 @@ class RecordingOptionsSidebar extends StatelessWidget {
                   : OverlayMode.off,
               onChanged: onCursorModeChanged,
             ),
-          ),
-          const SizedBox(height: AppSidebarTokens.rowGap),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: (cursorEnabled && cursorLinkedToRecording && !isRecording)
-                ? Text(
-                    l10n.cursorHint,
-                    key: const ValueKey('cursorHint'),
-                    style: helperStyle,
-                  )
-                : const SizedBox.shrink(key: ValueKey('noCursorHint')),
           ),
         ],
       ),
