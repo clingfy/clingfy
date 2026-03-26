@@ -266,4 +266,52 @@ void main() {
     await expectTitleSpacing(selectedIndex: 1, title: 'Camera');
     await expectTitleSpacing(selectedIndex: 2, title: 'Duration');
   });
+
+  testWidgets('face cam tab separates camera and overlay groups', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTestApp(selectedIndex: 1));
+    await tester.pumpAndSettle();
+
+    final spacer = tester.widget<SizedBox>(
+      find.byKey(const Key('recording_camera_overlay_gap')),
+    );
+
+    expect(spacer.height, AppSidebarTokens.optionsGroupGap);
+  });
+
+  testWidgets('output tab uses the new group rhythm between controls', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTestApp(selectedIndex: 2));
+    await tester.pumpAndSettle();
+
+    final frameRateDurationGap = tester.widget<SizedBox>(
+      find.byKey(const Key('recording_output_frame_rate_duration_gap')),
+    );
+    final durationCountdownGap = tester.widget<SizedBox>(
+      find.byKey(const Key('recording_output_duration_countdown_gap')),
+    );
+    final captureSettingsGapBeforeDivider = tester.widget<SizedBox>(
+      find.byKey(
+        const Key('recording_output_capture_settings_gap_before_divider'),
+      ),
+    );
+    final captureSettingsGapAfterDivider = tester.widget<SizedBox>(
+      find.byKey(
+        const Key('recording_output_capture_settings_gap_after_divider'),
+      ),
+    );
+
+    expect(frameRateDurationGap.height, AppSidebarTokens.optionsGroupGap);
+    expect(durationCountdownGap.height, AppSidebarTokens.optionsSubgroupGap);
+    expect(
+      captureSettingsGapBeforeDivider.height,
+      AppSidebarTokens.optionsGroupGap,
+    );
+    expect(
+      captureSettingsGapAfterDivider.height,
+      AppSidebarTokens.optionsGroupGap,
+    );
+  });
 }

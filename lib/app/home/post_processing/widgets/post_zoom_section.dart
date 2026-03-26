@@ -45,7 +45,10 @@ class PostZoomSection extends StatelessWidget {
                 },
         ),
         if (zoomFactor > 1.0) ...[
-          const SizedBox(height: AppSidebarTokens.rowGap),
+          const SizedBox(
+            key: Key('post_zoom_intensity_gap'),
+            height: AppSidebarTokens.optionsSubgroupGap,
+          ),
           AppSliderRow(
             label: l10n.intensity,
             valueText: '${zoomFactor.toStringAsFixed(1)}x',

@@ -126,13 +126,14 @@ class HomeShell extends StatelessWidget {
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: kEditorShellGap),
-                              if (showTimelineBar)
+                              if (showTimelineBar) ...[
+                                const SizedBox(height: kEditorShellGap),
                                 TimelineBar(
                                   onClose: () {
                                     unawaited(actions.closePreview(context));
                                   },
                                 ),
+                              ],
                             ],
                           ),
                         ),

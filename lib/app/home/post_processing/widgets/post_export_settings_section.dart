@@ -36,7 +36,10 @@ class PostExportSettingsSection extends StatelessWidget {
           onChanged: isProcessing ? null : onAutoNormalizeOnExportChanged,
         ),
         if (autoNormalizeOnExport) ...[
-          const SizedBox(height: AppSidebarTokens.rowGap),
+          const SizedBox(
+            key: Key('post_export_target_loudness_gap'),
+            height: AppSidebarTokens.optionsSubgroupGap,
+          ),
           AppSliderRow(
             label: l10n.targetLoudness,
             valueText: '${autoNormalizeTargetDbfs.toStringAsFixed(0)} dBFS',

@@ -17,4 +17,4 @@ const double kPostProcessingOptionsSidebarWidth = kSidebarWidth;
 const double kCornerRadius = 12.0;
 const double kEditorShellOuterPadding = 2.0;
 const double kEditorShellInnerPadding = 6.0;
-const double kEditorShellGap = 6.0;
+const double kEditorShellGap = 4.0;

@@ -385,9 +385,9 @@ class RecordingOptionsSidebar extends StatelessWidget {
         onRevealArea: onRevealArea,
         onClearArea: onClearArea,
       ),
-      const SizedBox(height: AppSidebarTokens.sectionGap),
+      const SizedBox(height: AppSidebarTokens.rowGap),
       Divider(color: theme.dividerColor.withValues(alpha: 0.1)),
-      const SizedBox(height: AppSidebarTokens.compactGap),
+      const SizedBox(height: AppSidebarTokens.rowGap),
       RecordingAudioSection(
         isRecording: isRecording,
         audioSources: audioSources,
@@ -403,9 +403,9 @@ class RecordingOptionsSidebar extends StatelessWidget {
         onSystemAudioEnabledChanged: onSystemAudioEnabledChanged,
         onExcludeMicFromSystemAudioChanged: onExcludeMicFromSystemAudioChanged,
       ),
-      const SizedBox(height: AppSidebarTokens.sectionGap),
+      const SizedBox(height: AppSidebarTokens.rowGap),
       Divider(color: theme.dividerColor.withValues(alpha: 0.1)),
-      const SizedBox(height: AppSidebarTokens.sectionGap),
+      const SizedBox(height: AppSidebarTokens.rowGap),
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -420,7 +420,7 @@ class RecordingOptionsSidebar extends StatelessWidget {
               onChanged: onCursorModeChanged,
             ),
           ),
-          const SizedBox(height: AppSidebarTokens.compactGap),
+          const SizedBox(height: AppSidebarTokens.rowGap),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: (cursorEnabled && cursorLinkedToRecording && !isRecording)
@@ -446,7 +446,11 @@ class RecordingOptionsSidebar extends StatelessWidget {
         onRefreshCams: onRefreshCams,
         onCamSourceChanged: onCamSourceChanged,
       ),
-      if (selectedCamId != null)
+      if (selectedCamId != null) ...[
+        const SizedBox(
+          key: Key('recording_camera_overlay_gap'),
+          height: AppSidebarTokens.rowGap,
+        ),
         RecordingOverlaySection(
           isRecording: isRecording,
           overlayMode: overlayMode,
@@ -485,6 +489,7 @@ class RecordingOptionsSidebar extends StatelessWidget {
           onChromaKeyStrengthChanged: onChromaKeyStrengthChanged,
           onChromaKeyColorChanged: onChromaKeyColorChanged,
         ),
+      ],
     ];
   }
 
@@ -506,9 +511,15 @@ class RecordingOptionsSidebar extends StatelessWidget {
         onCountdownDurationChanged: onCountdownDurationChanged,
       ),
       if (targetMode != DisplayTargetMode.singleAppWindow) ...[
-        const SizedBox(height: AppSidebarTokens.sectionGap),
+        const SizedBox(
+          key: Key('recording_output_capture_settings_gap_before_divider'),
+          height: AppSidebarTokens.rowGap,
+        ),
         Divider(color: theme.dividerColor.withValues(alpha: 0.1)),
-        const SizedBox(height: AppSidebarTokens.sectionGap),
+        const SizedBox(
+          key: Key('recording_output_capture_settings_gap_after_divider'),
+          height: AppSidebarTokens.rowGap,
+        ),
         RecordingCaptureSettingsSection(
           isRecording: isRecording,
           excludeRecorderAppFromCapture: excludeRecorderAppFromCapture,

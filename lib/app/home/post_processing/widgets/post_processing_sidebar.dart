@@ -272,9 +272,15 @@ class PostProcessingSidebar extends StatelessWidget {
         onRadiusChanged: onRadiusChanged,
         onRadiusChangeEnd: onRadiusChangeEnd,
       ),
-      const SizedBox(height: AppSidebarTokens.rowGap),
+      const SizedBox(
+        key: Key('post_layout_background_gap_before_divider'),
+        height: AppSidebarTokens.optionsGroupGap,
+      ),
       Divider(color: theme.dividerColor.withValues(alpha: 0.1)),
-      const SizedBox(height: AppSidebarTokens.rowGap),
+      const SizedBox(
+        key: Key('post_layout_background_gap_after_divider'),
+        height: AppSidebarTokens.optionsGroupGap,
+      ),
       PostBackgroundSection(
         isProcessing: isProcessing,
         backgroundColor: backgroundColor,
@@ -298,16 +304,25 @@ class PostProcessingSidebar extends StatelessWidget {
         onCursorSizeChanged: onCursorSizeChanged,
         onCursorSizeChangeEnd: onCursorSizeChangeEnd,
       ),
-      const SizedBox(height: AppSidebarTokens.sectionGap),
+      const SizedBox(
+        key: Key('post_effects_cursor_zoom_gap'),
+        height: AppSidebarTokens.optionsGroupGap,
+      ),
       PostZoomSection(
         isProcessing: isProcessing,
         zoomFactor: zoomFactor,
         onZoomFactorChanged: onZoomFactorChanged,
         onZoomFactorChangeEnd: onZoomFactorChangeEnd,
       ),
-      const SizedBox(height: AppSidebarTokens.compactGap),
+      const SizedBox(
+        key: Key('post_effects_audio_gap_before_divider'),
+        height: AppSidebarTokens.optionsSubgroupGap,
+      ),
       Divider(color: theme.dividerColor.withValues(alpha: 0.1)),
-      const SizedBox(height: AppSidebarTokens.sectionGap),
+      const SizedBox(
+        key: Key('post_effects_audio_gap_after_divider'),
+        height: AppSidebarTokens.optionsGroupGap,
+      ),
       PostAudioSection(
         hasAudio: hasAudio,
         audioVolume: audioVolume,

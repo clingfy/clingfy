@@ -384,4 +384,79 @@ void main() {
     await expectGap(1);
     await expectGap(2);
   });
+
+  testWidgets('layout tab uses the new group spacing around background', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildTestApp(selectedIndex: 0));
+    await tester.pumpAndSettle();
+
+    final backgroundGapBeforeDivider = tester.widget<SizedBox>(
+      find.byKey(const Key('post_layout_background_gap_before_divider')),
+    );
+    final backgroundGapAfterDivider = tester.widget<SizedBox>(
+      find.byKey(const Key('post_layout_background_gap_after_divider')),
+    );
+    final controlsGapBeforeDivider = tester.widget<SizedBox>(
+      find.byKey(const Key('post_layout_controls_gap_before_divider')),
+    );
+    final controlsGapAfterDivider = tester.widget<SizedBox>(
+      find.byKey(const Key('post_layout_controls_gap_after_divider')),
+    );
+
+    expect(backgroundGapBeforeDivider.height, AppSidebarTokens.optionsGroupGap);
+    expect(backgroundGapAfterDivider.height, AppSidebarTokens.optionsGroupGap);
+    expect(
+      controlsGapBeforeDivider.height,
+      AppSidebarTokens.optionsSubgroupGap,
+    );
+    expect(controlsGapAfterDivider.height, AppSidebarTokens.optionsSubgroupGap);
+  });
+
+  testWidgets(
+    'effects tab uses the new spacing between cursor, zoom, and audio',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTestApp(selectedIndex: 1, showCursor: true, zoomFactor: 2.0),
+      );
+      await tester.pumpAndSettle();
+
+      final cursorZoomGap = tester.widget<SizedBox>(
+        find.byKey(const Key('post_effects_cursor_zoom_gap')),
+      );
+      final audioGapBeforeDivider = tester.widget<SizedBox>(
+        find.byKey(const Key('post_effects_audio_gap_before_divider')),
+      );
+      final audioGapAfterDivider = tester.widget<SizedBox>(
+        find.byKey(const Key('post_effects_audio_gap_after_divider')),
+      );
+      final cursorSizeGap = tester.widget<SizedBox>(
+        find.byKey(const Key('post_cursor_size_gap')),
+      );
+      final zoomIntensityGap = tester.widget<SizedBox>(
+        find.byKey(const Key('post_zoom_intensity_gap')),
+      );
+
+      expect(cursorZoomGap.height, AppSidebarTokens.optionsGroupGap);
+      expect(audioGapBeforeDivider.height, AppSidebarTokens.optionsSubgroupGap);
+      expect(audioGapAfterDivider.height, AppSidebarTokens.optionsGroupGap);
+      expect(cursorSizeGap.height, AppSidebarTokens.optionsSubgroupGap);
+      expect(zoomIntensityGap.height, AppSidebarTokens.optionsSubgroupGap);
+    },
+  );
+
+  testWidgets('export tab uses the new spacing before normalization controls', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTestApp(selectedIndex: 2, autoNormalizeOnExport: true),
+    );
+    await tester.pumpAndSettle();
+
+    final spacer = tester.widget<SizedBox>(
+      find.byKey(const Key('post_export_target_loudness_gap')),
+    );
+
+    expect(spacer.height, AppSidebarTokens.optionsSubgroupGap);
+  });
 }

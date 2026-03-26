@@ -47,7 +47,10 @@ class PostCursorSection extends StatelessWidget {
           ),
         ],
         if (showCursor && cursorAvailable) ...[
-          const SizedBox(height: AppSidebarTokens.rowGap),
+          const SizedBox(
+            key: Key('post_cursor_size_gap'),
+            height: AppSidebarTokens.optionsSubgroupGap,
+          ),
           AppSliderRow(
             label: l10n.cursorSize,
             valueText: '${cursorSize.toStringAsFixed(1)}x',
