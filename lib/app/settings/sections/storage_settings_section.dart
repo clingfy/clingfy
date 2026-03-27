@@ -286,21 +286,6 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
                   );
                 },
               ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: AppButton(
-                  key: const Key('storage_clear_cached_recordings_button'),
-                  label: l10n.storageClearCachedRecordings,
-                  icon: CupertinoIcons.delete,
-                  variant: AppButtonVariant.secondary,
-                  onPressed: canClearCachedRecordings
-                      ? () {
-                          unawaited(_confirmAndClearCachedRecordings(context));
-                        }
-                      : null,
-                ),
-              ),
               if (_showDeveloperTools) ...[
                 const SizedBox(height: 16),
                 SettingsCard(
@@ -362,6 +347,35 @@ class _StorageSettingsSectionState extends State<StorageSettingsSection> {
                 ),
               ],
             ],
+            const SizedBox(height: 16),
+            Wrap(
+              alignment: WrapAlignment.start,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                AppButton(
+                  key: const Key('storage_open_system_settings_button'),
+                  label: l10n.openStorageSettings,
+                  icon: CupertinoIcons.gear,
+                  variant: AppButtonVariant.secondary,
+                  onPressed: () => _runAction(
+                    storage.openSystemStorageSettings,
+                    fallbackError: l10n.storageActionFailed,
+                  ),
+                ),
+                AppButton(
+                  key: const Key('storage_clear_cached_recordings_button'),
+                  label: l10n.storageClearCachedRecordings,
+                  icon: CupertinoIcons.delete,
+                  variant: AppButtonVariant.secondary,
+                  onPressed: canClearCachedRecordings
+                      ? () {
+                          unawaited(_confirmAndClearCachedRecordings(context));
+                        }
+                      : null,
+                ),
+              ],
+            ),
           ],
         );
       },
