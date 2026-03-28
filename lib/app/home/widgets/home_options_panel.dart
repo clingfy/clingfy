@@ -3,6 +3,8 @@ import 'package:clingfy/app/home/home_ui_state.dart';
 import 'package:clingfy/app/home/widgets/post_processing_sidebar_container.dart';
 import 'package:clingfy/app/home/widgets/recording_sidebar_container.dart';
 import 'package:clingfy/app/settings/settings_controller.dart';
+import 'package:clingfy/l10n/app_localizations.dart';
+import 'package:clingfy/ui/platform/widgets/app_pane_header.dart';
 import 'package:clingfy/ui/platform/widgets/desktop_pane_layout.dart';
 import 'package:clingfy/ui/theme/app_shell_tokens.dart';
 import 'package:flutter/material.dart';
@@ -29,8 +31,30 @@ class HomeOptionsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final tokens = context.appTokens;
     final chrome = context.appEditorChrome;
+    final title = _resolvedTitle(l10n);
+    final headerKey = _resolvedHeaderKey();
+    final body = showPreviewShell
+        ? PostProcessingSidebarContainer(
+            settingsController: settingsController,
+            isRecording: isRecording,
+            selectedIndex: uiState.postProcessingSidebarIndex,
+            availableWidth: panePresentation.effectiveWidth,
+            isCompact: panePresentation.isCompact,
+            showHeader: false,
+          )
+        : RecordingSidebarContainer(
+            isRecording: isRecording,
+            uiState: uiState,
+            actions: actions,
+            settingsController: settingsController,
+            selectedIndex: uiState.recordingSidebarIndex,
+            availableWidth: panePresentation.effectiveWidth,
+            isCompact: panePresentation.isCompact,
+            showHeader: false,
+          );
 
     return Container(
       key: const Key('home_options_panel_shell'),
@@ -40,56 +64,60 @@ class HomeOptionsPanel extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: panePresentation.effectiveCollapsed
-          ? _CollapsedOptionsPane(onExpand: onToggleCollapsed)
-          : Stack(
+          ? _CollapsedOptionsPane(
+              title: title,
+              expandTooltip: l10n.expandPane,
+              onExpand: onToggleCollapsed,
+            )
+          : Column(
               children: [
-                Positioned.fill(
-                  child: showPreviewShell
-                      ? PostProcessingSidebarContainer(
-                          settingsController: settingsController,
-                          isRecording: isRecording,
-                          selectedIndex: uiState.postProcessingSidebarIndex,
-                          availableWidth: panePresentation.effectiveWidth,
-                          isCompact: panePresentation.isCompact,
-                        )
-                      : RecordingSidebarContainer(
-                          isRecording: isRecording,
-                          uiState: uiState,
-                          actions: actions,
-                          settingsController: settingsController,
-                          selectedIndex: uiState.recordingSidebarIndex,
-                          availableWidth: panePresentation.effectiveWidth,
-                          isCompact: panePresentation.isCompact,
-                        ),
+                AppPaneHeader(
+                  headerKey: headerKey,
+                  title: title,
+                  trailingKey: const Key('home_options_panel_collapse_button'),
+                  trailingTooltip: l10n.collapsePane,
+                  trailingIcon: Icons.chevron_right_rounded,
+                  onTrailingPressed: onToggleCollapsed,
+                  isCompact: panePresentation.isCompact,
                 ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: IconButton(
-                    key: const Key('home_options_panel_collapse_button'),
-                    onPressed: onToggleCollapsed,
-                    tooltip: 'Collapse pane',
-                    visualDensity: VisualDensity.compact,
-                    splashRadius: 16,
-                    iconSize: 18,
-                    style: IconButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      backgroundColor: tokens.previewPanelBackground.withValues(
-                        alpha: 0.92,
-                      ),
-                    ),
-                    icon: const Icon(Icons.chevron_right_rounded),
-                  ),
-                ),
+                Expanded(child: body),
               ],
             ),
     );
   }
+
+  String _resolvedTitle(AppLocalizations l10n) {
+    if (showPreviewShell) {
+      return switch (uiState.postProcessingSidebarIndex) {
+        0 => l10n.layoutSettings,
+        1 => l10n.effectsSettings,
+        _ => l10n.exportSettings,
+      };
+    }
+
+    return switch (uiState.recordingSidebarIndex) {
+      0 => l10n.tabScreenAudio,
+      1 => l10n.tabFaceCam,
+      _ => l10n.output,
+    };
+  }
+
+  Key _resolvedHeaderKey() {
+    return showPreviewShell
+        ? const Key('post_sidebar_header')
+        : const Key('recording_sidebar_header');
+  }
 }
 
 class _CollapsedOptionsPane extends StatelessWidget {
-  const _CollapsedOptionsPane({required this.onExpand});
+  const _CollapsedOptionsPane({
+    required this.title,
+    required this.expandTooltip,
+    required this.onExpand,
+  });
 
+  final String title;
+  final String expandTooltip;
   final VoidCallback onExpand;
 
   @override
@@ -102,7 +130,7 @@ class _CollapsedOptionsPane extends StatelessWidget {
         child: IconButton(
           key: const Key('home_options_panel_expand_button'),
           onPressed: onExpand,
-          tooltip: 'Expand pane',
+          tooltip: '$expandTooltip: $title',
           splashRadius: 16,
           iconSize: 18,
           visualDensity: VisualDensity.compact,

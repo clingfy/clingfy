@@ -106,7 +106,7 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(
       prefs.getString(HomePrefsStore.homePaneLayoutKey),
-      '{"postProcessingSidebar":{"width":340.0,"lastExpandedWidth":340.0,"isCollapsed":false,"autoCollapseAllowed":true,"userResized":true}}',
+      '{"postProcessingSidebar":{"width":340.0,"lastExpandedWidth":340.0,"isCollapsed":false,"userResized":true}}',
     );
   });
 }

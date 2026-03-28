@@ -264,6 +264,48 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('asserts when configured with more than one flex pane', (
+    tester,
+  ) async {
+    _setDesktopWindow(tester);
+    final controller = DesktopPaneController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 900,
+          height: 400,
+          child: DesktopSplitLayout(
+            controller: controller,
+            gap: 4,
+            panes: [
+              DesktopPaneSlot(
+                spec: const DesktopPaneSpec(
+                  id: DesktopPaneId.homeLeftSidebar,
+                  defaultWidth: 200,
+                  minWidth: 200,
+                  flex: true,
+                ),
+                builder: (_, __) => const SizedBox(),
+              ),
+              DesktopPaneSlot(
+                spec: const DesktopPaneSpec(
+                  id: DesktopPaneId.homeRightWorkspace,
+                  defaultWidth: 200,
+                  minWidth: 200,
+                  flex: true,
+                ),
+                builder: (_, __) => const SizedBox(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isA<AssertionError>());
+  });
 }
 
 void _setDesktopWindow(

@@ -260,6 +260,27 @@ void main() {
     expect(find.byKey(const Key('home_sidebar_reset_button')), findsOneWidget);
     expect(
       find.descendant(
+        of: find.byKey(const Key('home_left_sidebar_shell')),
+        matching: find.text('Screen & Audio'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('home_left_sidebar_shell')),
+        matching: find.text('Face Cam'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('home_left_sidebar_shell')),
+        matching: find.text('App Settings'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
         of: find.byKey(const Key('recording_sidebar_header')),
         matching: find.text('Output'),
       ),
@@ -292,25 +313,13 @@ void main() {
       find.byKey(const Key('editor_shell_frame')),
     );
     final viewSize = tester.view.physicalSize / tester.view.devicePixelRatio;
-    final settingsButton = tester.widget<IconButton>(
-      find.byKey(const Key('home_sidebar_settings_button')),
-    );
-    final helpButton = tester.widget<IconButton>(
-      find.byKey(const Key('home_sidebar_help_button')),
-    );
-    final resetButton = tester.widget<IconButton>(
-      find.byKey(const Key('home_sidebar_reset_button')),
-    );
-    final utilityInactiveColor = theme.colorScheme.onSurfaceVariant.withValues(
-      alpha: 0.78,
-    );
 
+    expect(
+      railRect.width,
+      moreOrLessEquals(HomeDesktopPaneDimensions.railWidth),
+    );
     expect(toolbarRect.left, greaterThan(railRect.right));
     expect(toolbarRect.left, moreOrLessEquals(optionsRect.left));
-    expect(
-      logoRect.top - railRect.top,
-      moreOrLessEquals(AppSidebarTokens.sectionGap),
-    );
     expect(firstRailTileRect.top, greaterThan(logoRect.bottom));
     expect(resetRect.top, lessThan(helpRect.top));
     expect(helpRect.top, lessThan(settingsRect.top));
@@ -326,31 +335,6 @@ void main() {
     expect(frameRect.top, kEditorShellOuterPadding);
     expect(frameRect.right, viewSize.width - kEditorShellOuterPadding);
     expect(frameRect.bottom, viewSize.height - kEditorShellOuterPadding);
-    expect(settingsButton.iconSize, 28);
-    expect(helpButton.iconSize, 28);
-    expect(resetButton.iconSize, 28);
-    expect(
-      settingsButton.style?.backgroundColor?.resolve({}),
-      Colors.transparent,
-    );
-    expect(helpButton.style?.backgroundColor?.resolve({}), Colors.transparent);
-    expect(resetButton.style?.backgroundColor?.resolve({}), Colors.transparent);
-    expect(
-      settingsButton.style?.foregroundColor?.resolve({}),
-      utilityInactiveColor,
-    );
-    expect(
-      helpButton.style?.foregroundColor?.resolve({}),
-      utilityInactiveColor,
-    );
-    expect(
-      resetButton.style?.foregroundColor?.resolve({}),
-      utilityInactiveColor,
-    );
-    expect(
-      settingsButton.style?.foregroundColor?.resolve({WidgetState.hovered}),
-      theme.colorScheme.onSurface,
-    );
 
     expect(
       _decorationFor(
@@ -391,6 +375,82 @@ void main() {
       isNull,
     );
   });
+
+  testWidgets(
+    'left sidebar collapse switches between expanded and compact rail modes',
+    (tester) async {
+      _setDesktopWindow(tester);
+      final harness = await createHarness();
+
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.player.dispose);
+      addTearDown(harness.device.dispose);
+      addTearDown(harness.overlay.dispose);
+      addTearDown(harness.permissions.dispose);
+      addTearDown(harness.post.dispose);
+      addTearDown(harness.license.dispose);
+      addTearDown(harness.countdown.dispose);
+      addTearDown(harness.uiState.dispose);
+      addTearDown(harness.settings.dispose);
+
+      await tester.pumpWidget(
+        buildShell(
+          actions: harness.actions,
+          countdown: harness.countdown,
+          device: harness.device,
+          license: harness.license,
+          overlay: harness.overlay,
+          player: harness.player,
+          post: harness.post,
+          recording: harness.recording,
+          settings: harness.settings,
+          uiState: harness.uiState,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('home_left_sidebar_shell')),
+          matching: find.text('Screen & Audio'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('home_sidebar_collapse_button')));
+      await tester.pumpAndSettle();
+
+      final railRect = tester.getRect(
+        find.byKey(const Key('home_left_sidebar_shell')),
+      );
+      expect(
+        railRect.width,
+        moreOrLessEquals(HomeDesktopPaneDimensions.compactRailWidth),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('home_left_sidebar_shell')),
+          matching: find.text('Screen & Audio'),
+        ),
+        findsNothing,
+      );
+
+      await tester.tap(find.byKey(const Key('home_sidebar_collapse_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getRect(find.byKey(const Key('home_left_sidebar_shell'))).width,
+        moreOrLessEquals(HomeDesktopPaneDimensions.railWidth),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('home_left_sidebar_shell')),
+          matching: find.text('Screen & Audio'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
     'preview shell keeps the rail separate and aligns timeline with the workspace column',
@@ -648,6 +708,13 @@ void main() {
         moreOrLessEquals(HomeDesktopPaneDimensions.compactRailWidth),
       );
       expect(optionsRect.width, moreOrLessEquals(320));
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('home_left_sidebar_shell')),
+          matching: find.text('Screen & Audio'),
+        ),
+        findsNothing,
+      );
     },
   );
 

@@ -14,6 +14,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
     required this.selectedIndex,
     required this.availableWidth,
     required this.isCompact,
+    this.showHeader = true,
   });
 
   final SettingsController settingsController;
@@ -21,6 +22,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
   final int selectedIndex;
   final double availableWidth;
   final bool isCompact;
+  final bool showHeader;
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +80,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
           selectedIndex: selectedIndex,
           availableWidth: availableWidth,
           isCompact: isCompact,
+          showHeader: showHeader,
           enabled: canEditPost,
           isProcessing: vm.isEditingLocked,
           cursorAvailable: vm.cursorAvailable,

@@ -1,5 +1,6 @@
 import 'package:clingfy/l10n/app_localizations.dart';
 import 'package:clingfy/core/models/app_models.dart';
+import 'package:clingfy/ui/platform/widgets/app_pane_header.dart';
 import 'package:clingfy/ui/platform/widgets/app_sidebar_rail_button.dart';
 import 'package:clingfy/ui/platform/widgets/app_sidebar_tokens.dart';
 import 'package:clingfy/app/home/post_processing/widgets/post_audio_section.dart';
@@ -105,6 +106,7 @@ class PostProcessingSidebar extends StatelessWidget {
   final bool cursorAvailable;
   final bool hasAudio;
   final String? disabledMessage;
+  final bool showHeader;
   final double availableWidth;
   final bool isCompact;
   final double audioGainDb;
@@ -179,28 +181,15 @@ class PostProcessingSidebar extends StatelessWidget {
     this.cursorAvailable = true,
     this.hasAudio = true,
     this.disabledMessage,
+    this.showHeader = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final useCompactSpacing = isCompact || availableWidth <= 320;
     final horizontalPadding = useCompactSpacing
         ? 10.0
         : AppSidebarTokens.contentHorizontalPadding;
-    final headerTopPadding = useCompactSpacing
-        ? 10.0
-        : AppSidebarTokens.headerTopPadding;
-    final headerBottomPadding = useCompactSpacing
-        ? 8.0
-        : AppSidebarTokens.headerBottomPadding;
-    final headerStyle = (theme.textTheme.titleMedium ?? const TextStyle())
-        .copyWith(
-          color: colorScheme.onSurface,
-          fontWeight: FontWeight.w700,
-          fontSize: 16,
-        );
 
     return Opacity(
       opacity: enabled ? 1.0 : 0.45,
@@ -209,23 +198,12 @@ class PostProcessingSidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              key: const Key('post_sidebar_header'),
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                headerTopPadding,
-                horizontalPadding,
-                headerBottomPadding,
+            if (showHeader)
+              AppPaneHeader(
+                headerKey: const Key('post_sidebar_header'),
+                title: _headerTitle(context),
+                isCompact: useCompactSpacing,
               ),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: theme.dividerColor.withValues(alpha: 0.08),
-                  ),
-                ),
-              ),
-              child: Text(_headerTitle(context), style: headerStyle),
-            ),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.symmetric(horizontal: horizontalPadding),

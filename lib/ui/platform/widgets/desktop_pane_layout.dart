@@ -27,7 +27,12 @@ class DesktopPaneSpec {
     this.autoCollapsePriority = 0,
     this.autoCollapseAllowed = true,
     this.flex = false,
-  });
+  }) : assert(minWidth > 0),
+       assert(defaultWidth >= minWidth),
+       assert(maxWidth == null || maxWidth >= minWidth),
+       assert(maxWidth == null || maxWidth >= defaultWidth),
+       assert(!collapsible || collapsedWidth <= minWidth),
+       assert(!(resizable && flex));
 
   final DesktopPaneId id;
   final double defaultWidth;
@@ -55,28 +60,24 @@ class DesktopPaneState {
     this.width,
     this.lastExpandedWidth,
     this.isCollapsed = false,
-    this.autoCollapseAllowed = true,
     this.userResized = false,
   });
 
   final double? width;
   final double? lastExpandedWidth;
   final bool isCollapsed;
-  final bool autoCollapseAllowed;
   final bool userResized;
 
   DesktopPaneState copyWith({
     double? width,
     double? lastExpandedWidth,
     bool? isCollapsed,
-    bool? autoCollapseAllowed,
     bool? userResized,
   }) {
     return DesktopPaneState(
       width: width ?? this.width,
       lastExpandedWidth: lastExpandedWidth ?? this.lastExpandedWidth,
       isCollapsed: isCollapsed ?? this.isCollapsed,
-      autoCollapseAllowed: autoCollapseAllowed ?? this.autoCollapseAllowed,
       userResized: userResized ?? this.userResized,
     );
   }
@@ -86,7 +87,6 @@ class DesktopPaneState {
       if (width != null) 'width': width,
       if (lastExpandedWidth != null) 'lastExpandedWidth': lastExpandedWidth,
       'isCollapsed': isCollapsed,
-      'autoCollapseAllowed': autoCollapseAllowed,
       'userResized': userResized,
     };
   }
@@ -107,7 +107,6 @@ class DesktopPaneState {
       width: asPositiveDouble(raw['width']),
       lastExpandedWidth: asPositiveDouble(raw['lastExpandedWidth']),
       isCollapsed: raw['isCollapsed'] == true,
-      autoCollapseAllowed: raw['autoCollapseAllowed'] != false,
       userResized: raw['userResized'] == true,
     );
   }
@@ -118,18 +117,12 @@ class DesktopPaneState {
         other.width == width &&
         other.lastExpandedWidth == lastExpandedWidth &&
         other.isCollapsed == isCollapsed &&
-        other.autoCollapseAllowed == autoCollapseAllowed &&
         other.userResized == userResized;
   }
 
   @override
-  int get hashCode => Object.hash(
-    width,
-    lastExpandedWidth,
-    isCollapsed,
-    autoCollapseAllowed,
-    userResized,
-  );
+  int get hashCode =>
+      Object.hash(width, lastExpandedWidth, isCollapsed, userResized);
 }
 
 @immutable
@@ -338,11 +331,17 @@ class _DesktopSplitLayoutState extends State<DesktopSplitLayout> {
   double? _resizeStartDx;
   double? _resizeStartWidth;
   Map<DesktopPaneId, bool> _lastCollapsedStates = const <DesktopPaneId, bool>{};
+  double? _lastAvailableWidth;
 
   bool get _isDragging => _activeResizePaneId != null;
 
   @override
   Widget build(BuildContext context) {
+    assert(() {
+      _debugValidatePaneSpecs(widget.panes);
+      return true;
+    }());
+
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
@@ -351,19 +350,24 @@ class _DesktopSplitLayoutState extends State<DesktopSplitLayout> {
             final availableWidth = constraints.hasBoundedWidth
                 ? constraints.maxWidth
                 : _fallbackWidth();
+            final previousAvailableWidth = _lastAvailableWidth;
+            _lastAvailableWidth = availableWidth;
             final resolved = _resolveLayout(availableWidth);
+            final previousCollapsedStates = _lastCollapsedStates;
             final currentCollapsedStates = <DesktopPaneId, bool>{
               for (final pane in resolved.panes)
                 pane.presentation.id: pane.presentation.effectiveCollapsed,
             };
+            _lastCollapsedStates = currentCollapsedStates;
+            final widthChanged =
+                previousAvailableWidth != null &&
+                (previousAvailableWidth - availableWidth).abs() > 0.1;
             final collapseStateChanged =
-                _lastCollapsedStates.length != currentCollapsedStates.length ||
+                previousCollapsedStates.length !=
+                    currentCollapsedStates.length ||
                 currentCollapsedStates.entries.any(
-                  (entry) => _lastCollapsedStates[entry.key] != entry.value,
+                  (entry) => previousCollapsedStates[entry.key] != entry.value,
                 );
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _lastCollapsedStates = currentCollapsedStates;
-            });
             final row = SizedBox(
               width: resolved.layoutWidth,
               child: Stack(
@@ -379,7 +383,8 @@ class _DesktopSplitLayoutState extends State<DesktopSplitLayout> {
                       ) ...[
                         _buildPane(
                           resolved.panes[index],
-                          disableAnimation: collapseStateChanged,
+                          disableAnimation:
+                              collapseStateChanged || widthChanged,
                         ),
                         if (index < resolved.panes.length - 1)
                           SizedBox(width: widget.gap),
@@ -415,7 +420,10 @@ class _DesktopSplitLayoutState extends State<DesktopSplitLayout> {
     var totalWidth = 0.0;
     for (final pane in widget.panes) {
       final state = widget.controller.stateFor(pane.spec.id);
-      totalWidth += state.isCollapsed
+      final isForcedCollapsed =
+          pane.spec.collapsible &&
+          widget.forcedCollapsedPaneIds.contains(pane.spec.id);
+      totalWidth += (state.isCollapsed || isForcedCollapsed)
           ? pane.spec.collapsedWidth
           : pane.spec.defaultWidth;
     }
@@ -576,9 +584,6 @@ class _DesktopSplitLayoutState extends State<DesktopSplitLayout> {
                       !pane.spec.flex &&
                       pane.spec.collapsible &&
                       !(effectiveCollapsed[pane.spec.id] ?? false) &&
-                      widget.controller
-                          .stateFor(pane.spec.id)
-                          .autoCollapseAllowed &&
                       pane.spec.autoCollapseAllowed,
                 )
                 .toList()
@@ -723,6 +728,24 @@ class _DesktopSplitLayoutState extends State<DesktopSplitLayout> {
     required double flexWidth,
   }) {
     return _requiredFixedWidth(panes: panes, widths: widths) + flexWidth;
+  }
+
+  void _debugValidatePaneSpecs(List<DesktopPaneSlot> panes) {
+    final ids = <DesktopPaneId>{};
+    var flexCount = 0;
+
+    for (final pane in panes) {
+      final spec = pane.spec;
+      assert(ids.add(spec.id), 'Duplicate DesktopPaneId: ${spec.id.name}');
+      if (spec.flex) {
+        flexCount += 1;
+      }
+    }
+
+    assert(
+      flexCount <= 1,
+      'DesktopSplitLayout supports at most one flex pane.',
+    );
   }
 }
 

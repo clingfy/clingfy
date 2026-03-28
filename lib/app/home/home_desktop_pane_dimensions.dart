@@ -1,8 +1,8 @@
 import 'package:clingfy/ui/theme/app_shell_tokens.dart';
 
 abstract final class HomeDesktopPaneDimensions {
-  static const double railWidth = 60;
-  static const double compactRailWidth = 52;
+  static const double railWidth = 196;
+  static const double compactRailWidth = 58;
   static const double inspectorDefault = 348;
   static const double inspectorMin = 300;
   static const double inspectorMax = 420;
