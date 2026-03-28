@@ -227,6 +227,29 @@ final class CameraLayoutResolverTests: XCTestCase {
   }
 }
 
+private final class MockCaptureBackend: CaptureBackend {
+  var onStarted: ((URL) -> Void)?
+  var onFinished: ((URL?, Error?) -> Void)?
+  var onPaused: (() -> Void)?
+  var onResumed: (() -> Void)?
+  var onMicrophoneLevel: ((MicrophoneLevelSample) -> Void)?
+
+  var canPauseResume: Bool = true
+  var isRecording: Bool = false
+  var isPaused: Bool = false
+  var currentOutputURL: URL?
+  private(set) var overlayUpdates: [CGWindowID?] = []
+
+  func start(config: CaptureStartConfig) {}
+  func stop() {}
+  func pause() {}
+  func resume() {}
+
+  func updateOverlay(windowID: CGWindowID?) {
+    overlayUpdates.append(windowID)
+  }
+}
+
 @MainActor
 final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
   func testFinishMetadataPublishesFinalCameraBasename() throws {
@@ -333,6 +356,91 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     XCTAssertNil(excludedConfig.cameraOverlayWindowID)
   }
 
+  func testSeparateCameraModeSuppressesOverlayWindowDuringCapture() {
+    let prefs = PreferencesStore()
+    let originalOverlayEnabled = prefs.overlayEnabled
+    let originalOverlayLinked = prefs.overlayLinked
+    let originalCameraCaptureMode = prefs.cameraCaptureMode
+    defer {
+      prefs.overlayEnabled = originalOverlayEnabled
+      prefs.overlayLinked = originalOverlayLinked
+      prefs.cameraCaptureMode = originalCameraCaptureMode
+    }
+
+    prefs.overlayEnabled = true
+    prefs.overlayLinked = true
+    prefs.cameraCaptureMode = .separateCameraAsset
+
+    let facade = ScreenRecorderFacade()
+    XCTAssertTrue(facade._testShouldSuppressOverlayWindowDuringCapture())
+  }
+
+  func testSeparateCameraSyncForcesNilOverlayUpdateWhileRecording() {
+    let prefs = PreferencesStore()
+    let originalOverlayEnabled = prefs.overlayEnabled
+    let originalOverlayLinked = prefs.overlayLinked
+    let originalCameraCaptureMode = prefs.cameraCaptureMode
+    defer {
+      prefs.overlayEnabled = originalOverlayEnabled
+      prefs.overlayLinked = originalOverlayLinked
+      prefs.cameraCaptureMode = originalCameraCaptureMode
+    }
+
+    prefs.overlayEnabled = true
+    prefs.overlayLinked = true
+    prefs.cameraCaptureMode = .separateCameraAsset
+
+    let facade = ScreenRecorderFacade()
+    let backend = MockCaptureBackend()
+    facade._testSetCaptureBackend(backend)
+    facade._testSetRecorderState(.recording)
+
+    facade._testSyncOverlayWindowIntoCaptureIfNeeded()
+
+    XCTAssertEqual(backend.overlayUpdates.count, 1)
+    XCTAssertNil(backend.overlayUpdates[0])
+  }
+
+  func testCameraRecorderBeginResultDispatchesBeginCaptureToMain() {
+    let facade = ScreenRecorderFacade()
+    let beginCaptureExpectation = expectation(description: "beginCapture invoked on main")
+    let noFailureExpectation = expectation(description: "no failure callback")
+    noFailureExpectation.isInverted = true
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      Task { @MainActor in
+        facade._testHandleCameraRecorderBeginResult(
+          .success(()),
+          beginCapture: {
+            XCTAssertTrue(Thread.isMainThread)
+            beginCaptureExpectation.fulfill()
+          },
+          onFailure: { _ in
+            noFailureExpectation.fulfill()
+          }
+        )
+      }
+    }
+
+    wait(for: [beginCaptureExpectation, noFailureExpectation], timeout: 1.0)
+  }
+
+  func testOverlayUITransitionDispatchesToMain() {
+    let facade = ScreenRecorderFacade()
+    let expectation = expectation(description: "overlay transition runs on main")
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      Task { @MainActor in
+        facade._testRunOverlayUITransitionOnMain { isMainThread in
+          XCTAssertTrue(isMainThread)
+          expectation.fulfill()
+        }
+      }
+    }
+
+    wait(for: [expectation], timeout: 1.0)
+  }
+
   func testResolvePreviewMediaSourcesUsesPublishedCameraAsset() throws {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -413,6 +521,148 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let mediaSources = facade.resolvePreviewMediaSources(source: screenURL.path)
 
     XCTAssertNil(mediaSources.cameraPath)
+  }
+
+  func testResolvePreviewSceneIncludesTwoSourceMediaAndCameraParams() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("recording.mov")
+    let cameraURL = AppPaths.cameraRawURL(for: screenURL)
+    try Data("screen".utf8).write(to: screenURL)
+    try Data("camera".utf8).write(to: cameraURL)
+
+    let metadata = RecordingMetadata.create(
+      rawURL: screenURL,
+      displayMode: .explicitID,
+      displayID: 1,
+      cropRect: nil,
+      frameRate: 60,
+      quality: .fhd,
+      cursorEnabled: true,
+      cursorLinked: true,
+      windowID: nil,
+      excludedRecorderApp: false,
+      camera: RecordingMetadata.CameraCaptureInfo(
+        mode: .separateCameraAsset,
+        enabled: true,
+        rawRelativePath: cameraURL.lastPathComponent,
+        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: screenURL).lastPathComponent,
+        deviceId: "camera-1",
+        mirroredRaw: true,
+        nominalFrameRate: 30,
+        dimensions: .init(width: 1920, height: 1080),
+        segments: []
+      ),
+      editorSeed: makeEditorSeed()
+    )
+    try metadata.write(to: AppPaths.metadataSidecarURL(for: screenURL))
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 1280, height: 720),
+      padding: 0,
+      cornerRadius: 0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: true,
+      zoomEnabled: true,
+      zoomFactor: 1.5,
+      followStrength: 0.15,
+      fpsHint: 60,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    let facade = ScreenRecorderFacade()
+    let scene = facade.resolvePreviewScene(source: screenURL.path, screenParams: params)
+
+    XCTAssertEqual(scene.mediaSources.screenPath, screenURL.path)
+    XCTAssertEqual(scene.mediaSources.cameraPath, cameraURL.path)
+    XCTAssertEqual(scene.cameraParams?.layoutPreset, .overlayBottomRight)
+  }
+
+  func testRecordingSceneInfoFlagsAdvancedCameraExportStylingAsUnsupported() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("recording.mov")
+    let cameraURL = AppPaths.cameraRawURL(for: screenURL)
+    try Data("screen".utf8).write(to: screenURL)
+    try Data("camera".utf8).write(to: cameraURL)
+
+    let metadata = RecordingMetadata.create(
+      rawURL: screenURL,
+      displayMode: .explicitID,
+      displayID: 1,
+      cropRect: nil,
+      frameRate: 60,
+      quality: .fhd,
+      cursorEnabled: true,
+      cursorLinked: true,
+      windowID: nil,
+      excludedRecorderApp: false,
+      camera: RecordingMetadata.CameraCaptureInfo(
+        mode: .separateCameraAsset,
+        enabled: true,
+        rawRelativePath: cameraURL.lastPathComponent,
+        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: screenURL).lastPathComponent,
+        deviceId: "camera-1",
+        mirroredRaw: true,
+        nominalFrameRate: 30,
+        dimensions: .init(width: 1920, height: 1080),
+        segments: []
+      ),
+      editorSeed: makeEditorSeed()
+    )
+    try metadata.write(to: AppPaths.metadataSidecarURL(for: screenURL))
+
+    let facade = ScreenRecorderFacade()
+    var scenePayload: Any?
+    facade.getRecordingSceneInfo(source: screenURL.path) { value in
+      scenePayload = value
+    }
+
+    let payload = try XCTUnwrap(scenePayload as? [String: Any])
+    XCTAssertEqual(payload["cameraPath"] as? String, cameraURL.path)
+    XCTAssertEqual(payload["supportsAdvancedCameraExportStyling"] as? Bool, false)
+  }
+
+  func testSeparateCameraExportSanitizesUnsupportedAdvancedStyling() {
+    let params = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomRight,
+      normalizedCanvasCenter: CGPoint(x: 0.5, y: 0.5),
+      sizeFactor: 0.2,
+      shape: .circle,
+      cornerRadius: 0.35,
+      opacity: 0.9,
+      mirror: true,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 6,
+      borderColorArgb: 0xFFFFFFFF,
+      shadowPreset: 2,
+      chromaKeyEnabled: true,
+      chromaKeyStrength: 0.8,
+      chromaKeyColorArgb: 0xFF00FF00
+    )
+
+    let facade = ScreenRecorderFacade()
+    let sanitized = facade._testSanitizedCameraParamsForExport(
+      params,
+      cameraPath: "/tmp/recording.camera.mov"
+    )
+
+    XCTAssertEqual(sanitized?.shape, .square)
+    XCTAssertEqual(sanitized?.cornerRadius, 0.0)
+    XCTAssertEqual(sanitized?.borderWidth, 0.0)
+    XCTAssertNil(sanitized?.borderColorArgb)
+    XCTAssertEqual(sanitized?.shadowPreset, 0)
+    XCTAssertEqual(sanitized?.chromaKeyEnabled, false)
+    XCTAssertNil(sanitized?.chromaKeyColorArgb)
+    XCTAssertEqual(sanitized?.opacity, params.opacity)
+    XCTAssertEqual(sanitized?.mirror, params.mirror)
   }
 
   private func makeTemporaryDirectory() -> URL {

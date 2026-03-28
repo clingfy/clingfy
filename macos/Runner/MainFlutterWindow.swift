@@ -517,6 +517,12 @@ class MainFlutterWindow: NSWindow {
                 "cameraPath": mediaSources.cameraPath ?? "nil",
               ])
             view.open(mediaSources: mediaSources, sessionId: sessionId)
+            if let sceneRequest = pendingPreviewSceneRequest,
+              sceneRequest.sessionId == sessionId
+            {
+              view.updateComposition(scene: sceneRequest.scene)
+              pendingPreviewSceneRequest = nil
+            }
             pendingPreviewOpenRequest = nil
           } else {
             NativeLogger.i(

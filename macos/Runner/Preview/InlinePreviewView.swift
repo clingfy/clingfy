@@ -461,6 +461,10 @@ final class InlinePreviewView: NSView {
     isApplyingInitialCompositionForCurrentToken = false
     pendingCompositionWorkItem?.cancel()
     pendingCompositionWorkItem = nil
+    pendingCompositionParams = nil
+    pendingCameraCompositionParams = nil
+    currentCompositionParams = nil
+    currentCameraCompositionParams = nil
     currentLayout = nil
     currentPreviewProfile = nil
     setPreviewContentVisible(false)

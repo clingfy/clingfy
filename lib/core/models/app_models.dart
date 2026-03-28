@@ -187,15 +187,12 @@ class CameraCompositionState {
       opacity: (raw['opacity'] as num?)?.toDouble() ?? 1.0,
       mirror: raw['mirror'] as bool? ?? true,
       contentMode: CameraContentMode.fromRaw(raw['contentMode']?.toString()),
-      zoomBehavior: CameraZoomBehavior.fromRaw(
-        raw['zoomBehavior']?.toString(),
-      ),
+      zoomBehavior: CameraZoomBehavior.fromRaw(raw['zoomBehavior']?.toString()),
       borderWidth: (raw['borderWidth'] as num?)?.toDouble() ?? 0.0,
       borderColorArgb: (raw['borderColorArgb'] as num?)?.toInt(),
       shadowPreset: (raw['shadowPreset'] as num?)?.toInt() ?? 0,
       chromaKeyEnabled: raw['chromaKeyEnabled'] as bool? ?? false,
-      chromaKeyStrength:
-          (raw['chromaKeyStrength'] as num?)?.toDouble() ?? 0.4,
+      chromaKeyStrength: (raw['chromaKeyStrength'] as num?)?.toDouble() ?? 0.4,
       chromaKeyColorArgb: (raw['chromaKeyColorArgb'] as num?)?.toInt(),
     );
   }
@@ -206,10 +203,7 @@ class CameraCompositionState {
       'cameraLayoutPreset': layoutPreset.name,
       'cameraNormalizedCenter': normalizedCanvasCenter == null
           ? null
-          : {
-              'x': normalizedCanvasCenter!.dx,
-              'y': normalizedCanvasCenter!.dy,
-            },
+          : {'x': normalizedCanvasCenter!.dx, 'y': normalizedCanvasCenter!.dy},
       'cameraSizeFactor': sizeFactor,
       'cameraShape': shape.name,
       'cameraCornerRadius': cornerRadius,

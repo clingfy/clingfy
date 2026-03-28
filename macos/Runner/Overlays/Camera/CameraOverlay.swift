@@ -470,6 +470,7 @@ final class CameraOverlay: NSObject {
   }
 
   func resize(size: Double) {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.i("CameraOverlay", "resize to: \(size). isCustomPos: \(isCustomPosition)")
     guard let win = window else { return }
 
@@ -554,6 +555,7 @@ final class CameraOverlay: NSObject {
     file: String = #file,
     line: Int = #line
   ) {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.d("CameraOverlay", "Show file= \(file):\(line)")
     let desired = size ?? preferredSize
     NativeLogger.i(
@@ -609,7 +611,7 @@ final class CameraOverlay: NSObject {
     let pipelineChanged =
       (activeChromaKeyEnabled != chromaKeyEnabled) || (activeDeviceId != (deviceId ?? "default"))
 
-    if isShowing, let win = window, !pipelineChanged,
+    if isShowing, window != nil, !pipelineChanged,
       oldPreferredSize == preferredSize
     {
       NativeLogger.i("CameraOverlay", "show() - resize applied (no rebuild)")
@@ -625,7 +627,7 @@ final class CameraOverlay: NSObject {
       )
     }
 
-    if let w = window {
+    if window != nil {
       NativeLogger.d("CameraOverlay", "Window already exists, hiding first.")
       hide()
     }
@@ -850,6 +852,7 @@ final class CameraOverlay: NSObject {
   }
 
   func hide() {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.i("CameraOverlay", "Hide called")
     captureCoordinator.setSampleBufferHandler(nil)
     captureCoordinator.removePreviewLayer(preview)
@@ -876,6 +879,7 @@ final class CameraOverlay: NSObject {
   }
 
   func setFrame(x: Double, y: Double, width: Double, height: Double) {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.i("CameraOverlay", "setFrame explicit: x=\(x), y=\(y), w=\(width)")
     guard let win = window else { return }
     var f = win.frame

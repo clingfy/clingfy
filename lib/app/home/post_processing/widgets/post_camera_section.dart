@@ -15,6 +15,7 @@ class PostCameraSection extends StatelessWidget {
   const PostCameraSection({
     super.key,
     required this.hasCameraAsset,
+    required this.supportsAdvancedCameraExportStyling,
     required this.cameraState,
     required this.onVisibleChanged,
     required this.onLayoutPresetChanged,
@@ -33,6 +34,7 @@ class PostCameraSection extends StatelessWidget {
   });
 
   final bool hasCameraAsset;
+  final bool supportsAdvancedCameraExportStyling;
   final CameraCompositionState? cameraState;
   final ValueChanged<bool> onVisibleChanged;
   final ValueChanged<CameraLayoutPreset> onLayoutPresetChanged;
@@ -63,13 +65,24 @@ class PostCameraSection extends StatelessWidget {
           value: hasCameraAsset && camera.visible,
           onChanged: hasCameraAsset ? onVisibleChanged : null,
         ),
-        if (!hasCameraAsset) ...[
+        // if (!hasCameraAsset)
+         ...[
           const SizedBox(height: AppSidebarTokens.compactGap),
           const AppInlineNotice(
             message: 'No separate camera asset was recorded for this clip.',
             variant: AppInlineNoticeVariant.info,
           ),
-        ] else ...[
+        ] ,
+        //else 
+        ...[
+          if (!supportsAdvancedCameraExportStyling) ...[
+            const SizedBox(height: AppSidebarTokens.compactGap),
+            const AppInlineNotice(
+              message:
+                  'Advanced camera styling is preview-only right now. Export keeps layout, size, opacity, mirror, and fit/fill.',
+              variant: AppInlineNoticeVariant.info,
+            ),
+          ],
           const SizedBox(height: AppSidebarTokens.optionsSubgroupGap),
           AppFormRow(
             label: l10n.position,
@@ -146,10 +159,7 @@ class PostCameraSection extends StatelessWidget {
             control: PlatformDropdown<CameraContentMode>(
               value: camera.contentMode,
               items: [
-                PlatformMenuItem(
-                  value: CameraContentMode.fit,
-                  label: l10n.fit,
-                ),
+                PlatformMenuItem(value: CameraContentMode.fit, label: l10n.fit),
                 PlatformMenuItem(
                   value: CameraContentMode.fill,
                   label: l10n.fill,

@@ -607,6 +607,19 @@ protocol RecordingIndicatorManaging: AnyObject {
 
 @MainActor
 final class ScreenRecorderFacade: NSObject {
+  private final class MainThreadOperationRelay: NSObject {
+    private let operation: () -> Void
+
+    init(operation: @escaping () -> Void) {
+      self.operation = operation
+    }
+
+    @objc
+    func invoke() {
+      operation()
+    }
+  }
+
   private struct IndicatorConfiguration {
     let state: IndicatorState
     let onPauseTapped: (() -> Void)?
@@ -946,16 +959,11 @@ final class ScreenRecorderFacade: NSObject {
           return
         }
 
-        self.cameraRecorder.begin(session: cameraSession) { result in
-          switch result {
-          case .success:
-            beginCapture()
-          case .failure(let error):
-            self.finishStartWithError(
-              (error as? FlutterError)
-                ?? flutterError(NativeErrorCode.recordingError, error.localizedDescription)
-            )
-          }
+        self.cameraRecorder.begin(session: cameraSession) { [weak self] result in
+          self?.handleCameraRecorderBeginResult(
+            result,
+            beginCapture: beginCapture
+          )
         }
       }
 
@@ -986,6 +994,30 @@ final class ScreenRecorderFacade: NSObject {
     }
   }
   private func prepareCameraOverlayForRecordingStart(
+    targetDisplayID: CGDirectDisplayID,
+    completion: @escaping (CGWindowID?) -> Void
+  ) {
+    guard Thread.isMainThread else {
+      runOverlayUITransitionOnMain(
+        reason: "prepareCameraOverlayForRecordingStart",
+        file: #file,
+        line: #line
+      ) { [weak self] in
+        self?.prepareCameraOverlayForRecordingStart(
+          targetDisplayID: targetDisplayID,
+          completion: completion
+        )
+      }
+      return
+    }
+
+    prepareCameraOverlayForRecordingStartOnMain(
+      targetDisplayID: targetDisplayID,
+      completion: completion
+    )
+  }
+
+  private func prepareCameraOverlayForRecordingStartOnMain(
     targetDisplayID: CGDirectDisplayID,
     completion: @escaping (CGWindowID?) -> Void
   ) {
@@ -2057,13 +2089,14 @@ final class ScreenRecorderFacade: NSObject {
     )
 
     DispatchQueue.main.async {
-      pendingPreviewSceneRequest = PendingPreviewSceneRequest(
-        sessionId: sessionId,
-        scene: previewScene
-      )
-
       if let view = inlinePreviewViewInstance {
         view.updateComposition(scene: previewScene)
+        pendingPreviewSceneRequest = nil
+      } else {
+        pendingPreviewSceneRequest = PendingPreviewSceneRequest(
+          sessionId: sessionId,
+          scene: previewScene
+        )
       }
     }
     result(source)
@@ -2587,6 +2620,24 @@ final class ScreenRecorderFacade: NSObject {
     file: String = #file,
     line: Int = #line
   ) {
+    guard Thread.isMainThread else {
+      runOverlayUITransitionOnMain(
+        reason: "updateOverlayVisibility",
+        file: file,
+        line: line
+      ) { [weak self] in
+        self?.updateOverlayVisibility(file: file, line: line)
+      }
+      return
+    }
+
+    updateOverlayVisibilityOnMain(file: file, line: line)
+  }
+
+  private func updateOverlayVisibilityOnMain(
+    file: String,
+    line: Int
+  ) {
     NativeLogger.d("Facade", "updateOverlayVisibility file= \(file):\(line)")
     let shouldShow =
       effectiveOverlayEnabledForRecording && (!prefs.overlayLinked || isShowingRecordingLinkedVisuals())
@@ -2698,6 +2749,76 @@ final class ScreenRecorderFacade: NSObject {
     }
 
     capture.updateOverlay(windowID: windowID)
+  }
+
+  private func runOnMainIfNeeded(
+    reason: String,
+    category: String,
+    file: String? = nil,
+    line: Int? = nil,
+    operation: @escaping () -> Void
+  ) {
+    if Thread.isMainThread {
+      operation()
+      return
+    }
+
+    var context: [String: String] = [:]
+    if let file {
+      context["file"] = file
+    }
+    if let line {
+      context["line"] = String(line)
+    }
+
+    NativeLogger.w(
+      category,
+      "\(reason) requested off main thread; dispatching to main",
+      context: context
+    )
+    let relay = MainThreadOperationRelay(operation: operation)
+    relay.performSelector(
+      onMainThread: #selector(MainThreadOperationRelay.invoke),
+      with: nil,
+      waitUntilDone: false
+    )
+  }
+
+  private func runOverlayUITransitionOnMain(
+    reason: String,
+    file: String = #file,
+    line: Int = #line,
+    operation: @escaping () -> Void
+  ) {
+    runOnMainIfNeeded(
+      reason: reason,
+      category: "OverlayDbg",
+      file: file,
+      line: line,
+      operation: operation
+    )
+  }
+
+  private func handleCameraRecorderBeginResult(
+    _ result: Result<Void, Error>,
+    beginCapture: @escaping () -> Void,
+    onFailure: ((FlutterError) -> Void)? = nil
+  ) {
+    let failureHandler: (FlutterError) -> Void = onFailure ?? { [weak self] error in
+      self?.finishStartWithError(error)
+    }
+
+    runOnMainIfNeeded(reason: "cameraRecorder.begin completion", category: "Facade") {
+      switch result {
+      case .success:
+        beginCapture()
+      case .failure(let error):
+        failureHandler(
+          (error as? FlutterError)
+            ?? flutterError(NativeErrorCode.recordingError, error.localizedDescription)
+        )
+      }
+    }
   }
 
   private func resetOverlayUpdateDeduper() {
@@ -3391,6 +3512,47 @@ final class ScreenRecorderFacade: NSObject {
       cameraResult: cameraResult,
       publishedScreenURL: publishedScreenURL
     )
+  }
+
+  func _testShouldSuppressOverlayWindowDuringCapture() -> Bool {
+    shouldSuppressOverlayWindowDuringCapture
+  }
+
+  func _testSetCaptureBackend(_ backend: CaptureBackend) {
+    setCaptureBackend(backend)
+  }
+
+  func _testSyncOverlayWindowIntoCaptureIfNeeded() {
+    syncOverlayWindowIntoCaptureIfNeeded()
+  }
+
+  func _testSanitizedCameraParamsForExport(
+    _ params: CameraCompositionParams?,
+    cameraPath: String?
+  ) -> CameraCompositionParams? {
+    exportSanitizedCameraParams(params, cameraPath: cameraPath)
+  }
+
+  func _testHandleCameraRecorderBeginResult(
+    _ result: Result<Void, Error>,
+    beginCapture: @escaping () -> Void,
+    onFailure: @escaping (FlutterError) -> Void
+  ) {
+    handleCameraRecorderBeginResult(
+      result,
+      beginCapture: beginCapture,
+      onFailure: onFailure
+    )
+  }
+
+  func _testRunOverlayUITransitionOnMain(
+    file: String = #file,
+    line: Int = #line,
+    operation: @escaping (Bool) -> Void
+  ) {
+    runOverlayUITransitionOnMain(reason: "testOverlayUITransition", file: file, line: line) {
+      operation(Thread.isMainThread)
+    }
   }
 #endif
 

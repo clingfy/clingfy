@@ -28,6 +28,9 @@ void main() {
     double zoomFactor = 1.0,
     bool autoNormalizeOnExport = false,
     String? backgroundImagePath,
+    bool hasCameraAsset = false,
+    bool supportsAdvancedCameraExportStyling = true,
+    CameraCompositionState? cameraState,
     void Function(double)? onZoomFactorChanged,
     void Function(double)? onZoomFactorChangeEnd,
     void Function(String?)? onBackgroundImageChanged,
@@ -77,8 +80,10 @@ void main() {
             onZoomFactorChanged: onZoomFactorChanged ?? (_) {},
             onZoomFactorChangeEnd: onZoomFactorChangeEnd ?? (_) {},
             onPickImage: () async => null,
-            hasCameraAsset: false,
-            cameraState: null,
+            hasCameraAsset: hasCameraAsset,
+            supportsAdvancedCameraExportStyling:
+                supportsAdvancedCameraExportStyling,
+            cameraState: cameraState,
             onCameraVisibleChanged: (_) {},
             onCameraLayoutPresetChanged: (_) {},
             onCameraSizeFactorChanged: (_) {},
@@ -263,6 +268,29 @@ void main() {
     expect(find.byType(AppInlineNotice), findsNWidgets(2));
     expect(find.text('Cursor data missing'), findsOneWidget);
     expect(find.text('No mic audio track found'), findsOneWidget);
+  });
+
+  testWidgets('camera section shows preview-only notice for advanced styling', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildTestApp(
+        hasCameraAsset: true,
+        supportsAdvancedCameraExportStyling: false,
+        cameraState: const CameraCompositionState.hidden().copyWith(
+          visible: true,
+          layoutPreset: CameraLayoutPreset.overlayBottomRight,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Advanced camera styling is preview-only right now. Export keeps layout, size, opacity, mirror, and fit/fill.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('effects tab exposes zoom and cursor helper copy as tooltips', (
