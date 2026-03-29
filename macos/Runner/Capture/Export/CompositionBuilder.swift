@@ -586,6 +586,11 @@ final class CompositionBuilder {
     let zoomState: CameraAnimationZoomState
   }
 
+  private enum ExportZoomApplicationMode {
+    case compositeVideoLayer
+    case screenOverlayOnly
+  }
+
   private func orientedSize(_ track: AVAssetTrack) -> CGSize {
     let rect = CGRect(origin: .zero, size: track.naturalSize).applying(track.preferredTransform)
     return .init(width: abs(rect.width), height: abs(rect.height))
@@ -618,6 +623,17 @@ final class CompositionBuilder {
     let tx = (target.width - contentWidth) / 2
     let ty = (target.height - contentHeight) / 2
     let contentRect = CGRect(x: tx, y: ty, width: contentWidth, height: contentHeight)
+    let exportZoomSamples = forExport
+      ? buildExportZoomSamplesIfNeeded(
+        recording: cursorRecording,
+        params: params,
+        target: target,
+        contentRect: contentRect,
+        contentWidth: contentWidth,
+        contentHeight: contentHeight,
+        videoDuration: asset.duration.seconds
+      )
+      : []
 
     let comp = AVMutableVideoComposition()
     let renderSize: CGSize
@@ -638,15 +654,23 @@ final class CompositionBuilder {
     instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
     let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: vTrack)
 
-    let renderScale = forExport ? 1.0 : (previewProfile?.renderScale ?? 1.0)
-    var transform = vTrack.preferredTransform
-      .concatenating(CGAffineTransform(scaleX: s * renderScale, y: s * renderScale))
-
     if forExport {
-      transform = transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
+      layerInstruction.setTransform(
+        fittedTransform(
+          for: vTrack,
+          sourceSize: src,
+          destinationRect: contentRect,
+          fitMode: fit,
+          mirror: false
+        ),
+        at: .zero
+      )
+    } else {
+      let renderScale = previewProfile?.renderScale ?? 1.0
+      let transform = vTrack.preferredTransform
+        .concatenating(CGAffineTransform(scaleX: s * renderScale, y: s * renderScale))
+      layerInstruction.setTransform(transform, at: .zero)
     }
-
-    layerInstruction.setTransform(transform, at: .zero)
     instruction.layerInstructions = [layerInstruction]
     comp.instructions = [instruction]
 
@@ -663,6 +687,8 @@ final class CompositionBuilder {
         tx: tx,
         ty: ty,
         videoToTargetScale: s,
+        zoomSamples: exportZoomSamples,
+        zoomApplicationMode: .compositeVideoLayer,
         includeRoundedMask: true
       )
     }
@@ -705,6 +731,15 @@ final class CompositionBuilder {
     let tx = (target.width - contentWidth) / 2
     let ty = (target.height - contentHeight) / 2
     let screenContentRect = CGRect(x: tx, y: ty, width: contentWidth, height: contentHeight)
+    let exportZoomSamples = buildExportZoomSamplesIfNeeded(
+      recording: cursorRecording,
+      params: params,
+      target: target,
+      contentRect: screenContentRect,
+      contentWidth: contentWidth,
+      contentHeight: contentHeight,
+      videoDuration: screenAsset.duration.seconds
+    )
 
     let composition = AVMutableComposition()
 
@@ -742,15 +777,20 @@ final class CompositionBuilder {
       let screenLayerInstruction = AVMutableVideoCompositionLayerInstruction(
         assetTrack: composedScreenTrack
       )
-      screenLayerInstruction.setTransform(
-        fittedTransform(
-          for: screenTrack,
-          sourceSize: screenSourceSize,
-          destinationRect: screenContentRect,
-          fitMode: screenFitMode,
-          mirror: false
-        ),
-        at: .zero
+      let baseScreenTransform = fittedTransform(
+        for: screenTrack,
+        sourceSize: screenSourceSize,
+        destinationRect: screenContentRect,
+        fitMode: screenFitMode,
+        mirror: false
+      )
+      applyZoomTransformRamps(
+        to: screenLayerInstruction,
+        baseTransform: baseScreenTransform,
+        zoomSamples: exportZoomSamples,
+        focusX: screenContentRect.midX,
+        focusY: screenContentRect.midY,
+        effectiveDuration: screenAsset.duration.seconds
       )
       layerInstructions.append(screenLayerInstruction)
 
@@ -785,11 +825,7 @@ final class CompositionBuilder {
           let presentationSamples = buildCameraPresentationSamples(
             params: params,
             cameraParams: cameraParams,
-            cursorRecording: cursorRecording,
-            target: target,
-            contentRect: screenContentRect,
-            contentWidth: contentWidth,
-            contentHeight: contentHeight,
+            zoomSamples: exportZoomSamples,
             effectiveDuration: effectiveDuration
           )
           let cameraPresentation = presentationSamples.isEmpty
@@ -904,6 +940,8 @@ final class CompositionBuilder {
         tx: tx,
         ty: ty,
         videoToTargetScale: screenScale,
+        zoomSamples: exportZoomSamples,
+        zoomApplicationMode: .screenOverlayOnly,
         includeRoundedMask: false
       )
 
@@ -925,23 +963,137 @@ final class CompositionBuilder {
     fitMode: String,
     mirror: Bool
   ) -> CGAffineTransform {
-    let scaleX = destinationRect.width / max(sourceSize.width, 1.0)
-    let scaleY = destinationRect.height / max(sourceSize.height, 1.0)
+    let orientedRect = CGRect(origin: .zero, size: track.naturalSize).applying(track.preferredTransform)
+    let normalizedPreferredTransform = track.preferredTransform.concatenating(
+      CGAffineTransform(translationX: -orientedRect.minX, y: -orientedRect.minY)
+    )
+    let normalizedSourceSize = CGSize(
+      width: max(abs(orientedRect.width), sourceSize.width),
+      height: max(abs(orientedRect.height), sourceSize.height)
+    )
+    let scaleX = destinationRect.width / max(normalizedSourceSize.width, 1.0)
+    let scaleY = destinationRect.height / max(normalizedSourceSize.height, 1.0)
     let scale = fitMode == "fill" ? max(scaleX, scaleY) : min(scaleX, scaleY)
-    let renderedWidth = sourceSize.width * scale
-    let renderedHeight = sourceSize.height * scale
+    let renderedWidth = normalizedSourceSize.width * scale
+    let renderedHeight = normalizedSourceSize.height * scale
     let offsetX = destinationRect.minX + ((destinationRect.width - renderedWidth) / 2.0)
     let offsetY = destinationRect.minY + ((destinationRect.height - renderedHeight) / 2.0)
 
-    var transform = track.preferredTransform
+    var transform = normalizedPreferredTransform
     if mirror {
       transform = transform
-        .concatenating(CGAffineTransform(translationX: sourceSize.width, y: 0))
+        .concatenating(CGAffineTransform(translationX: normalizedSourceSize.width, y: 0))
         .concatenating(CGAffineTransform(scaleX: -1.0, y: 1.0))
     }
     transform = transform.concatenating(CGAffineTransform(scaleX: scale, y: scale))
     transform = transform.concatenating(CGAffineTransform(translationX: offsetX, y: offsetY))
     return transform
+  }
+
+  func _testFittedRect(
+    for track: AVAssetTrack,
+    sourceSize: CGSize,
+    destinationRect: CGRect,
+    fitMode: String,
+    mirror: Bool
+  ) -> CGRect {
+    CGRect(origin: .zero, size: track.naturalSize)
+      .applying(
+        fittedTransform(
+          for: track,
+          sourceSize: sourceSize,
+          destinationRect: destinationRect,
+          fitMode: fitMode,
+          mirror: mirror
+        )
+      )
+      .standardized
+  }
+
+  private func buildExportZoomSamplesIfNeeded(
+    recording: CursorRecording?,
+    params: CompositionParams,
+    target: CGSize,
+    contentRect: CGRect,
+    contentWidth: Double,
+    contentHeight: Double,
+    videoDuration: Double
+  ) -> [ExportZoomSample] {
+    guard let recording, !recording.frames.isEmpty else {
+      return []
+    }
+
+    return buildExportZoomSamples(
+      recording: recording,
+      params: params,
+      target: target,
+      contentRect: contentRect,
+      contentWidth: contentWidth,
+      contentHeight: contentHeight,
+      videoDuration: videoDuration
+    )
+  }
+
+  private func exportZoomTransform(
+    focusX: CGFloat,
+    focusY: CGFloat,
+    sample: ExportZoomSample
+  ) -> CGAffineTransform {
+    CGAffineTransform.identity
+      .translatedBy(x: focusX, y: focusY)
+      .scaledBy(x: sample.zoom, y: sample.zoom)
+      .translatedBy(x: -sample.centerX, y: -sample.centerY)
+  }
+
+  private func applyZoomTransformRamps(
+    to layerInstruction: AVMutableVideoCompositionLayerInstruction,
+    baseTransform: CGAffineTransform,
+    zoomSamples: [ExportZoomSample],
+    focusX: CGFloat,
+    focusY: CGFloat,
+    effectiveDuration: Double
+  ) {
+    guard !zoomSamples.isEmpty else {
+      layerInstruction.setTransform(baseTransform, at: .zero)
+      return
+    }
+
+    let transforms = zoomSamples.map { sample in
+      baseTransform.concatenating(
+        exportZoomTransform(
+          focusX: focusX,
+          focusY: focusY,
+          sample: sample
+        )
+      )
+    }
+
+    if let firstTransform = transforms.first {
+      layerInstruction.setTransform(firstTransform, at: .zero)
+    }
+
+    guard
+      transforms.count >= 2,
+      let firstTransform = transforms.first,
+      transforms.dropFirst().contains(where: { !transformsApproximatelyEqual($0, firstTransform) })
+    else {
+      return
+    }
+
+    for idx in 0..<(zoomSamples.count - 1) {
+      let startSeconds = zoomSamples[idx].time
+      let endSeconds = min(zoomSamples[idx + 1].time, effectiveDuration)
+      guard endSeconds > startSeconds else { continue }
+
+      let startTime = CMTime(seconds: startSeconds, preferredTimescale: 600)
+      let endTime = CMTime(seconds: endSeconds, preferredTimescale: 600)
+      let timeRange = CMTimeRange(start: startTime, end: endTime)
+      layerInstruction.setTransformRamp(
+        fromStart: transforms[idx],
+        toEnd: transforms[idx + 1],
+        timeRange: timeRange
+      )
+    }
   }
 
   private func configureExportAnimationTool(
@@ -956,6 +1108,8 @@ final class CompositionBuilder {
     tx: Double,
     ty: Double,
     videoToTargetScale: CGFloat,
+    zoomSamples: [ExportZoomSample],
+    zoomApplicationMode: ExportZoomApplicationMode,
     includeRoundedMask: Bool
   ) {
     guard
@@ -963,6 +1117,7 @@ final class CompositionBuilder {
         || params.backgroundColor != nil
         || params.backgroundImagePath != nil
         || params.showCursor
+        || (zoomApplicationMode == .compositeVideoLayer && !zoomSamples.isEmpty)
     else {
       return
     }
@@ -989,6 +1144,8 @@ final class CompositionBuilder {
 
     let videoLayer = CALayer()
     videoLayer.frame = CGRect(origin: .zero, size: target)
+    videoLayer.anchorPoint = .zero
+    videoLayer.position = .zero
     parentLayer.addSublayer(videoLayer)
 
     if includeRoundedMask, params.cornerRadius > 0 {
@@ -1003,10 +1160,22 @@ final class CompositionBuilder {
       videoLayer.mask = maskLayer
     }
 
+    let screenOverlayLayer: CALayer? = {
+      guard zoomApplicationMode == .screenOverlayOnly, params.showCursor else {
+        return nil
+      }
+      let overlayLayer = CALayer()
+      overlayLayer.frame = CGRect(origin: .zero, size: target)
+      overlayLayer.anchorPoint = .zero
+      overlayLayer.position = .zero
+      overlayLayer.masksToBounds = false
+      parentLayer.addSublayer(overlayLayer)
+      return overlayLayer
+    }()
+
     if params.showCursor, let recording = cursorRecording, !recording.frames.isEmpty {
       addCursorLayer(
-        to: parentLayer,
-        videoLayer: videoLayer,
+        to: screenOverlayLayer ?? videoLayer,
         recording: recording,
         params: params,
         target: target,
@@ -1018,6 +1187,25 @@ final class CompositionBuilder {
         asset: asset,
         videoToTargetScale: videoToTargetScale
       )
+    }
+
+    if !zoomSamples.isEmpty {
+      let zoomTargetLayer: CALayer?
+      switch zoomApplicationMode {
+      case .compositeVideoLayer:
+        zoomTargetLayer = videoLayer
+      case .screenOverlayOnly:
+        zoomTargetLayer = screenOverlayLayer
+      }
+      if let zoomTargetLayer {
+        applyZoomAnimation(
+          to: zoomTargetLayer,
+          zoomSamples: zoomSamples,
+          focusX: contentRect.midX,
+          focusY: contentRect.midY,
+          videoDuration: asset.duration.seconds
+        )
+      }
     }
 
     composition.animationTool = AVVideoCompositionCoreAnimationTool(
@@ -1183,16 +1371,11 @@ final class CompositionBuilder {
   private func buildCameraPresentationSamples(
     params: CompositionParams,
     cameraParams: CameraCompositionParams,
-    cursorRecording: CursorRecording?,
-    target: CGSize,
-    contentRect: CGRect,
-    contentWidth: Double,
-    contentHeight: Double,
+    zoomSamples: [ExportZoomSample],
     effectiveDuration: Double
   ) -> [CameraPresentationSample] {
     let needsZoomSamples =
-      params.zoomEnabled
-      && cursorRecording?.frames.isEmpty == false
+      !zoomSamples.isEmpty
       && (
         cameraParams.zoomBehavior == .scaleWithScreenZoom
           || cameraParams.zoomEmphasisPreset == .pulse
@@ -1200,18 +1383,10 @@ final class CompositionBuilder {
 
     var samples: [CameraPresentationSample] = []
 
-    if needsZoomSamples, let cursorRecording {
-      let zoomSamples = buildExportZoomSamples(
-        recording: cursorRecording,
-        params: params,
-        target: target,
-        contentRect: contentRect,
-        contentWidth: contentWidth,
-        contentHeight: contentHeight,
-        videoDuration: effectiveDuration
-      ).filter { $0.time <= effectiveDuration + 0.0001 }
-
-      samples = zoomSamples.map {
+    if needsZoomSamples {
+      samples = zoomSamples
+        .filter { $0.time <= effectiveDuration + 0.0001 }
+        .map {
         CameraPresentationSample(
           time: $0.time,
           zoom: $0.zoom,
@@ -1299,8 +1474,7 @@ final class CompositionBuilder {
   }
 
   private func addCursorLayer(
-    to parentLayer: CALayer,
-    videoLayer: CALayer,
+    to hostLayer: CALayer,
     recording: CursorRecording,
     params: CompositionParams,
     target: CGSize,
@@ -1354,10 +1528,9 @@ final class CompositionBuilder {
 
     cursorContainer.addSublayer(cursorLayer)
 
-    // STRICT: Ensure videoLayer is zero-anchored for the Zoom Matrix to work accurately
-    videoLayer.anchorPoint = .zero
-    videoLayer.position = .zero
-    videoLayer.addSublayer(cursorContainer)
+    hostLayer.anchorPoint = .zero
+    hostLayer.position = .zero
+    hostLayer.addSublayer(cursorContainer)
 
     // Helper map functions (Video Space)
     let mapX: (Double) -> CGFloat = { tx + CGFloat($0) * contentWidth }
@@ -1505,44 +1678,48 @@ final class CompositionBuilder {
       }
     }
 
-    // --- Zoom Animation ---
-    if params.zoomEnabled {
-      // [FIX 3] Anchor Point Normalization
-      // Ensure videoLayer transforms from 0,0 so our matrix math aligns perfectly
-      videoLayer.anchorPoint = .zero
-      videoLayer.position = .zero
+  }
 
-      let focusX = contentRect.midX
-      let focusY = contentRect.midY
-      let zoomSamples = buildExportZoomSamples(
-        recording: recording,
-        params: params,
-        target: target,
-        contentRect: contentRect,
-        contentWidth: contentWidth,
-        contentHeight: contentHeight,
-        videoDuration: videoDuration
+  private func applyZoomAnimation(
+    to layer: CALayer,
+    zoomSamples: [ExportZoomSample],
+    focusX: CGFloat,
+    focusY: CGFloat,
+    videoDuration: Double
+  ) {
+    guard !zoomSamples.isEmpty else { return }
+
+    layer.anchorPoint = .zero
+    layer.position = .zero
+
+    let times = zoomSamples.map { NSNumber(value: $0.time / max(videoDuration, 0.0001)) }
+    let values = zoomSamples.map { sample -> NSValue in
+      let transform = exportZoomTransform(
+        focusX: focusX,
+        focusY: focusY,
+        sample: sample
       )
+      return NSValue(caTransform3D: CATransform3DMakeAffineTransform(transform))
+    }
 
-      let times = zoomSamples.map { NSNumber(value: $0.time / max(videoDuration, 0.0001)) }
-      let values = zoomSamples.map { sample -> NSValue in
-        var transform = CATransform3DIdentity
-        transform = CATransform3DTranslate(transform, focusX, focusY, 0)
-        transform = CATransform3DScale(transform, sample.zoom, sample.zoom, 1)
-        transform = CATransform3DTranslate(transform, -sample.centerX, -sample.centerY, 0)
-        return NSValue(caTransform3D: transform)
-      }
+    let zoomAnim = CAKeyframeAnimation(keyPath: "transform")
+    zoomAnim.values = values
+    zoomAnim.keyTimes = times
+    zoomAnim.duration = videoDuration
+    zoomAnim.beginTime = AVCoreAnimationBeginTimeAtZero
+    zoomAnim.isRemovedOnCompletion = false
+    zoomAnim.fillMode = .forwards
+    zoomAnim.calculationMode = .linear
 
-      let zoomAnim = CAKeyframeAnimation(keyPath: "transform")
-      zoomAnim.values = values
-      zoomAnim.keyTimes = times
-      zoomAnim.duration = videoDuration
-      zoomAnim.beginTime = AVCoreAnimationBeginTimeAtZero
-      zoomAnim.isRemovedOnCompletion = false
-      zoomAnim.fillMode = .forwards
-      zoomAnim.calculationMode = .linear
-
-      videoLayer.add(zoomAnim, forKey: "transform")
+    layer.add(zoomAnim, forKey: "transform")
+    if let lastSample = zoomSamples.last {
+      layer.transform = CATransform3DMakeAffineTransform(
+        exportZoomTransform(
+          focusX: focusX,
+          focusY: focusY,
+          sample: lastSample
+        )
+      )
     }
   }
 

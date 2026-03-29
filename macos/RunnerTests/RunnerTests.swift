@@ -1115,6 +1115,293 @@ final class LetterboxExporterTests: XCTestCase {
     }
   }
 
+  func testTwoSourceExportAppliesScreenZoomRampWhileKeepingFixedCameraStatic() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    let cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      zoomScaleMultiplier: 0.35,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: makeZoomCursorRecording(),
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    XCTAssertEqual(instruction.layerInstructions.count, 2)
+
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    let screenInstruction = try XCTUnwrap(instruction.layerInstructions.last)
+
+    var cameraStart = CGAffineTransform.identity
+    var cameraEnd = CGAffineTransform.identity
+    var cameraTimeRange = CMTimeRange.zero
+    let hasCameraRamp = cameraInstruction.getTransformRamp(
+      for: CMTime(seconds: 0.52, preferredTimescale: 600),
+      start: &cameraStart,
+      end: &cameraEnd,
+      timeRange: &cameraTimeRange
+    )
+
+    if hasCameraRamp {
+      XCTAssertTrue(
+        transformsApproximatelyEqual(cameraStart, cameraEnd),
+        "fixed camera behavior should stay static even while the screen zooms"
+      )
+    }
+
+    var screenStart = CGAffineTransform.identity
+    var screenEnd = CGAffineTransform.identity
+    var screenTimeRange = CMTimeRange.zero
+    let hasScreenRamp = screenInstruction.getTransformRamp(
+      for: CMTime(seconds: 0.52, preferredTimescale: 600),
+      start: &screenStart,
+      end: &screenEnd,
+      timeRange: &screenTimeRange
+    )
+
+    XCTAssertTrue(hasScreenRamp)
+    XCTAssertFalse(
+      transformsApproximatelyEqual(screenStart, screenEnd),
+      "screen transform should vary during active zoom in the two-source path"
+    )
+    XCTAssertGreaterThan(screenTimeRange.duration.seconds, 0.0)
+  }
+
+  func testSingleSourceExportConfiguresCompositeZoomWithoutCursorOverlay() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: nil,
+        params: params,
+        cameraParams: nil,
+        cursorRecording: makeZoomCursorRecording(),
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    XCTAssertNotNil(
+      result.videoComposition.animationTool,
+      "single-source export should still configure the composite zoom animation tool even when the cursor overlay is hidden"
+    )
+  }
+
+  func testTwoSourceExportKeepsCameraPinnedWhileCursorFollowsZoomedScreen() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 20.0,
+      showCursor: true,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    let cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomLeft,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      zoomScaleMultiplier: 0.35,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: makeZoomCursorRecording(),
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let outputURL = tempDir.appendingPathComponent("two-source.mov")
+    try exportComposition(result, to: outputURL, preset: AVAssetExportPresetHighestQuality)
+
+    let image = try sampleFrameImage(url: outputURL, time: 0.55)
+    let cameraResolution = CameraLayoutResolver.effectiveFrame(
+      canvasSize: params.targetSize,
+      params: cameraParams
+    )
+    let cameraCrop = try XCTUnwrap(
+      bestCropImage(for: image, canvasSize: params.targetSize, cropRect: cameraResolution.frame)
+    )
+    let centerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: params.targetSize,
+        cropRect: CGRect(x: 220, y: 80, width: 200, height: 200)
+      )
+    )
+
+    XCTAssertGreaterThan(
+      try dominantRedRatio(for: cameraCrop, ignoreTransparentPixels: false),
+      0.25,
+      "camera crop should remain visibly red in its pinned overlay frame during opposite-side zoom"
+    )
+    XCTAssertGreaterThan(
+      try dominantWhiteRatio(for: centerCrop, ignoreTransparentPixels: false),
+      0.002,
+      "cursor should stay visually tied to the zoomed screen path near the viewport center"
+    )
+  }
+
+  func testNormalizedFittedTransformRemovesPreferredTransformOriginOffset() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 80, height: 80),
+      durationSeconds: 1.0,
+      color: .systemRed,
+      preferredTransform: CGAffineTransform(translationX: 23, y: 17)
+    )
+
+    let asset = AVAsset(url: cameraURL)
+    let track = try XCTUnwrap(asset.tracks(withMediaType: .video).first)
+    let destinationRect = CGRect(x: 40, y: 60, width: 100, height: 100)
+
+    let builder = CompositionBuilder()
+    let fittedRect = builder._testFittedRect(
+      for: track,
+      sourceSize: CGSize(width: 80, height: 80),
+      destinationRect: destinationRect,
+      fitMode: "fit",
+      mirror: false
+    )
+
+    XCTAssertEqual(fittedRect.minX, destinationRect.minX, accuracy: 1.0)
+    XCTAssertEqual(fittedRect.minY, destinationRect.minY, accuracy: 1.0)
+    XCTAssertEqual(fittedRect.width, destinationRect.width, accuracy: 1.0)
+    XCTAssertEqual(fittedRect.height, destinationRect.height, accuracy: 1.0)
+  }
+
   func testIntroFadeAddsCameraOpacityRampAtStart() throws {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -1926,60 +2213,18 @@ final class LetterboxExporterTests: XCTestCase {
     url: URL,
     size: CGSize,
     durationSeconds: Double,
-    color: NSColor
+    color: NSColor,
+    preferredTransform: CGAffineTransform = .identity
   ) throws {
-    try? FileManager.default.removeItem(at: url)
-
-    let writer = try AVAssetWriter(url: url, fileType: .mov)
-    let settings: [String: Any] = [
-      AVVideoCodecKey: AVVideoCodecType.h264,
-      AVVideoWidthKey: Int(size.width),
-      AVVideoHeightKey: Int(size.height),
-    ]
-    let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-    input.expectsMediaDataInRealTime = false
-
-    let pixelAttributes: [String: Any] = [
-      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-      kCVPixelBufferWidthKey as String: Int(size.width),
-      kCVPixelBufferHeightKey as String: Int(size.height),
-      kCVPixelBufferCGImageCompatibilityKey as String: true,
-      kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
-    ]
-    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-      assetWriterInput: input,
-      sourcePixelBufferAttributes: pixelAttributes
+    try makePatternVideo(
+      url: url,
+      size: size,
+      durationSeconds: durationSeconds,
+      backgroundColor: color,
+      subjectRect: nil,
+      subjectColor: nil,
+      preferredTransform: preferredTransform
     )
-
-    XCTAssertTrue(writer.canAdd(input))
-    writer.add(input)
-    XCTAssertTrue(writer.startWriting())
-    writer.startSession(atSourceTime: .zero)
-
-    let fps: Int32 = 30
-    let frameCount = max(6, Int(durationSeconds * Double(fps)))
-
-    for frame in 0..<frameCount {
-      while !input.isReadyForMoreMediaData {
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
-      }
-
-      let pixelBuffer = try makePixelBuffer(size: size, color: color)
-      let time = CMTime(value: CMTimeValue(frame), timescale: fps)
-      XCTAssertTrue(adaptor.append(pixelBuffer, withPresentationTime: time))
-    }
-
-    input.markAsFinished()
-    let semaphore = DispatchSemaphore(value: 0)
-    writer.finishWriting {
-      semaphore.signal()
-    }
-    semaphore.wait()
-
-    if let error = writer.error {
-      throw error
-    }
-    XCTAssertEqual(writer.status, .completed)
   }
 
   private func makeGreenScreenSubjectVideo(
@@ -1987,6 +2232,30 @@ final class LetterboxExporterTests: XCTestCase {
     size: CGSize,
     durationSeconds: Double
   ) throws {
+    try makePatternVideo(
+      url: url,
+      size: size,
+      durationSeconds: durationSeconds,
+      backgroundColor: .systemGreen,
+      subjectRect: CGRect(
+        x: size.width * 0.28,
+        y: size.height * 0.22,
+        width: size.width * 0.44,
+        height: size.height * 0.58
+      ),
+      subjectColor: .systemRed
+    )
+  }
+
+  private func makePatternVideo(
+    url: URL,
+    size: CGSize,
+    durationSeconds: Double,
+    backgroundColor: NSColor,
+    subjectRect: CGRect?,
+    subjectColor: NSColor?,
+    preferredTransform: CGAffineTransform = .identity
+  ) throws {
     try? FileManager.default.removeItem(at: url)
 
     let writer = try AVAssetWriter(url: url, fileType: .mov)
@@ -1997,6 +2266,7 @@ final class LetterboxExporterTests: XCTestCase {
     ]
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
     input.expectsMediaDataInRealTime = false
+    input.transform = preferredTransform
 
     let pixelAttributes: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
@@ -2017,12 +2287,6 @@ final class LetterboxExporterTests: XCTestCase {
 
     let fps: Int32 = 30
     let frameCount = max(6, Int(durationSeconds * Double(fps)))
-    let subjectRect = CGRect(
-      x: size.width * 0.28,
-      y: size.height * 0.22,
-      width: size.width * 0.44,
-      height: size.height * 0.58
-    )
 
     for frame in 0..<frameCount {
       while !input.isReadyForMoreMediaData {
@@ -2031,9 +2295,9 @@ final class LetterboxExporterTests: XCTestCase {
 
       let pixelBuffer = try makePatternPixelBuffer(
         size: size,
-        backgroundColor: .systemGreen,
+        backgroundColor: backgroundColor,
         subjectRect: subjectRect,
-        subjectColor: .systemRed
+        subjectColor: subjectColor
       )
       let time = CMTime(value: CMTimeValue(frame), timescale: fps)
       XCTAssertTrue(adaptor.append(pixelBuffer, withPresentationTime: time))
@@ -2181,11 +2445,11 @@ final class LetterboxExporterTests: XCTestCase {
     XCTAssertEqual(export.status, .completed)
   }
 
-  private func sampleFrameImage(url: URL) throws -> CGImage {
+  private func sampleFrameImage(url: URL, time: Double = 0.5) throws -> CGImage {
     let asset = AVAsset(url: url)
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
-    return try generator.copyCGImage(at: CMTime(seconds: 0.5, preferredTimescale: 600), actualTime: nil)
+    return try generator.copyCGImage(at: CMTime(seconds: time, preferredTimescale: 600), actualTime: nil)
   }
 
   private func nonBlackRatio(
@@ -2257,6 +2521,19 @@ final class LetterboxExporterTests: XCTestCase {
       ignoreTransparentPixels: ignoreTransparentPixels,
       predicate: { red, green, blue in
         Int(red) > Int(green) + 20 && Int(red) > Int(blue) + 20
+      }
+    )
+  }
+
+  private func dominantWhiteRatio(
+    for image: CGImage,
+    ignoreTransparentPixels: Bool
+  ) throws -> Double {
+    try colorRatio(
+      for: image,
+      ignoreTransparentPixels: ignoreTransparentPixels,
+      predicate: { red, green, blue in
+        red > 220 && green > 220 && blue > 220
       }
     )
   }
