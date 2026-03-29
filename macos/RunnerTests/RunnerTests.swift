@@ -1,3 +1,4 @@
+import AVFoundation
 import Cocoa
 import FlutterMacOS
 import XCTest
@@ -156,6 +157,33 @@ final class RecordingMetadataTests: XCTestCase {
   }
 }
 
+final class CameraRecorderTests: XCTestCase {
+  func testRecordingStoppedErrorWithSuccessKeyIsTreatedAsSuccessfulFinish() {
+    let error = NSError(
+      domain: AVFoundationErrorDomain,
+      code: AVError.unknown.rawValue,
+      userInfo: [
+        NSLocalizedDescriptionKey: "Recording Stopped",
+        AVErrorRecordingSuccessfullyFinishedKey: true,
+      ]
+    )
+
+    XCTAssertTrue(CameraRecorder._testRecordingFinishedSuccessfully(error))
+  }
+
+  func testRecordingStoppedErrorWithoutSuccessKeyIsTreatedAsFailure() {
+    let error = NSError(
+      domain: AVFoundationErrorDomain,
+      code: AVError.unknown.rawValue,
+      userInfo: [
+        NSLocalizedDescriptionKey: "Recording Stopped"
+      ]
+    )
+
+    XCTAssertFalse(CameraRecorder._testRecordingFinishedSuccessfully(error))
+  }
+}
+
 final class CameraLayoutResolverTests: XCTestCase {
   func testManualFrameClampsIntoCanvasBounds() {
     let params = CameraCompositionParams(
@@ -227,6 +255,111 @@ final class CameraLayoutResolverTests: XCTestCase {
   }
 }
 
+final class LetterboxExporterTests: XCTestCase {
+  func testSeparateCameraExportUsesStyledIntermediateForAdvancedStyling() {
+    let exporter = LetterboxExporter()
+    let params = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .circle,
+      cornerRadius: 0.0,
+      opacity: 0.9,
+      mirror: true,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    XCTAssertTrue(exporter._testShouldUseStyledCameraIntermediate(cameraParams: params))
+  }
+
+  func testSeparateCameraExportSkipsStyledIntermediateForGeometryOnlyParams() {
+    let exporter = LetterboxExporter()
+    let params = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 0.9,
+      mirror: true,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    XCTAssertFalse(exporter._testShouldUseStyledCameraIntermediate(cameraParams: params))
+  }
+}
+
+final class ScreenCaptureKitOverlayFilterPolicyTests: XCTestCase {
+  func testOverlayWindowExcludedWhenSeparateCameraModeKeepsRecorderVisible() {
+    let windows = [
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 11, bundleIdentifier: "com.clingfy.clingfy.dev"),
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 12, bundleIdentifier: "com.apple.finder"),
+    ]
+
+    let excluded = ScreenCaptureKitOverlayFilterPolicy.excludedWindowIDs(
+      windows: windows,
+      selfBundleIdentifier: "com.clingfy.clingfy.dev",
+      overlayWindowID: 11,
+      excludeRecorderApp: false,
+      excludeCameraOverlayWindow: true
+    )
+
+    XCTAssertEqual(excluded, [11])
+  }
+
+  func testOverlayAndRecorderWindowsExcludedTogetherWhenRecorderAppExcluded() {
+    let windows = [
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 11, bundleIdentifier: "com.clingfy.clingfy.dev"),
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 13, bundleIdentifier: "com.clingfy.clingfy.dev"),
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 12, bundleIdentifier: "com.apple.finder"),
+    ]
+
+    let excluded = ScreenCaptureKitOverlayFilterPolicy.excludedWindowIDs(
+      windows: windows,
+      selfBundleIdentifier: "com.clingfy.clingfy.dev",
+      overlayWindowID: 11,
+      excludeRecorderApp: true,
+      excludeCameraOverlayWindow: true
+    )
+
+    XCTAssertEqual(excluded, [11, 13])
+  }
+
+  func testBakedOverlayKeepsOverlayWindowWhenRecorderAppExcluded() {
+    let windows = [
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 11, bundleIdentifier: "com.clingfy.clingfy.dev"),
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 13, bundleIdentifier: "com.clingfy.clingfy.dev"),
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(windowID: 12, bundleIdentifier: "com.apple.finder"),
+    ]
+
+    let excluded = ScreenCaptureKitOverlayFilterPolicy.excludedWindowIDs(
+      windows: windows,
+      selfBundleIdentifier: "com.clingfy.clingfy.dev",
+      overlayWindowID: 11,
+      excludeRecorderApp: true,
+      excludeCameraOverlayWindow: false
+    )
+
+    XCTAssertEqual(excluded, [13])
+  }
+}
+
 private final class MockCaptureBackend: CaptureBackend {
   var onStarted: ((URL) -> Void)?
   var onFinished: ((URL?, Error?) -> Void)?
@@ -235,13 +368,15 @@ private final class MockCaptureBackend: CaptureBackend {
   var onMicrophoneLevel: ((MicrophoneLevelSample) -> Void)?
 
   var canPauseResume: Bool = true
+  var supportsLiveOverlayExclusionDuringSeparateCameraCapture: Bool = false
   var isRecording: Bool = false
   var isPaused: Bool = false
   var currentOutputURL: URL?
   private(set) var overlayUpdates: [CGWindowID?] = []
+  private(set) var stopCallCount: Int = 0
 
   func start(config: CaptureStartConfig) {}
-  func stop() {}
+  func stop() { stopCallCount += 1 }
   func pause() {}
   func resume() {}
 
@@ -344,7 +479,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       effectiveOverlayID: 42
     )
     XCTAssertFalse(defaultConfig.excludeRecorderApp)
-    XCTAssertNil(defaultConfig.cameraOverlayWindowID)
+    XCTAssertEqual(defaultConfig.cameraOverlayWindowID, 42)
+    XCTAssertTrue(defaultConfig.excludeCameraOverlayWindow)
 
     prefs.excludeRecorderApp = true
 
@@ -353,29 +489,11 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       effectiveOverlayID: 42
     )
     XCTAssertTrue(excludedConfig.excludeRecorderApp)
-    XCTAssertNil(excludedConfig.cameraOverlayWindowID)
+    XCTAssertEqual(excludedConfig.cameraOverlayWindowID, 42)
+    XCTAssertTrue(excludedConfig.excludeCameraOverlayWindow)
   }
 
-  func testSeparateCameraModeSuppressesOverlayWindowDuringCapture() {
-    let prefs = PreferencesStore()
-    let originalOverlayEnabled = prefs.overlayEnabled
-    let originalOverlayLinked = prefs.overlayLinked
-    let originalCameraCaptureMode = prefs.cameraCaptureMode
-    defer {
-      prefs.overlayEnabled = originalOverlayEnabled
-      prefs.overlayLinked = originalOverlayLinked
-      prefs.cameraCaptureMode = originalCameraCaptureMode
-    }
-
-    prefs.overlayEnabled = true
-    prefs.overlayLinked = true
-    prefs.cameraCaptureMode = .separateCameraAsset
-
-    let facade = ScreenRecorderFacade()
-    XCTAssertTrue(facade._testShouldSuppressOverlayWindowDuringCapture())
-  }
-
-  func testSeparateCameraSyncForcesNilOverlayUpdateWhileRecording() {
+  func testSeparateCameraModeSuppressesOverlayWindowDuringCaptureOnAVFoundation() {
     let prefs = PreferencesStore()
     let originalOverlayEnabled = prefs.overlayEnabled
     let originalOverlayLinked = prefs.overlayLinked
@@ -392,13 +510,79 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
 
     let facade = ScreenRecorderFacade()
     let backend = MockCaptureBackend()
+    backend.supportsLiveOverlayExclusionDuringSeparateCameraCapture = false
+    facade._testSetCaptureBackend(backend)
+    XCTAssertTrue(facade._testShouldSuppressOverlayWindowDuringCapture())
+  }
+
+  func testSeparateCameraModeKeepsOverlayVisibleOnScreenCaptureKit() {
+    let prefs = PreferencesStore()
+    let originalOverlayEnabled = prefs.overlayEnabled
+    let originalOverlayLinked = prefs.overlayLinked
+    let originalCameraCaptureMode = prefs.cameraCaptureMode
+    defer {
+      prefs.overlayEnabled = originalOverlayEnabled
+      prefs.overlayLinked = originalOverlayLinked
+      prefs.cameraCaptureMode = originalCameraCaptureMode
+    }
+
+    prefs.overlayEnabled = true
+    prefs.overlayLinked = true
+    prefs.cameraCaptureMode = .separateCameraAsset
+
+    let facade = ScreenRecorderFacade()
+    let backend = MockCaptureBackend()
+    backend.supportsLiveOverlayExclusionDuringSeparateCameraCapture = true
+    facade._testSetCaptureBackend(backend)
+    XCTAssertFalse(facade._testShouldSuppressOverlayWindowDuringCapture())
+  }
+
+  func testSeparateCameraOverlaySyncUsesNilOnAVFoundation() {
+    let prefs = PreferencesStore()
+    let originalOverlayEnabled = prefs.overlayEnabled
+    let originalOverlayLinked = prefs.overlayLinked
+    let originalCameraCaptureMode = prefs.cameraCaptureMode
+    defer {
+      prefs.overlayEnabled = originalOverlayEnabled
+      prefs.overlayLinked = originalOverlayLinked
+      prefs.cameraCaptureMode = originalCameraCaptureMode
+    }
+
+    prefs.overlayEnabled = true
+    prefs.overlayLinked = true
+    prefs.cameraCaptureMode = .separateCameraAsset
+
+    let facade = ScreenRecorderFacade()
+    let backend = MockCaptureBackend()
+    backend.supportsLiveOverlayExclusionDuringSeparateCameraCapture = false
     facade._testSetCaptureBackend(backend)
     facade._testSetRecorderState(.recording)
 
-    facade._testSyncOverlayWindowIntoCaptureIfNeeded()
+    XCTAssertNil(facade._testOverlayWindowIDForCapture(liveOverlayWindowID: 77))
+  }
 
-    XCTAssertEqual(backend.overlayUpdates.count, 1)
-    XCTAssertNil(backend.overlayUpdates[0])
+  func testSeparateCameraOverlaySyncUsesLiveOverlayWindowOnScreenCaptureKit() {
+    let prefs = PreferencesStore()
+    let originalOverlayEnabled = prefs.overlayEnabled
+    let originalOverlayLinked = prefs.overlayLinked
+    let originalCameraCaptureMode = prefs.cameraCaptureMode
+    defer {
+      prefs.overlayEnabled = originalOverlayEnabled
+      prefs.overlayLinked = originalOverlayLinked
+      prefs.cameraCaptureMode = originalCameraCaptureMode
+    }
+
+    prefs.overlayEnabled = true
+    prefs.overlayLinked = true
+    prefs.cameraCaptureMode = .separateCameraAsset
+
+    let facade = ScreenRecorderFacade()
+    let backend = MockCaptureBackend()
+    backend.supportsLiveOverlayExclusionDuringSeparateCameraCapture = true
+    facade._testSetCaptureBackend(backend)
+    facade._testSetRecorderState(.recording)
+
+    XCTAssertEqual(facade._testOverlayWindowIDForCapture(liveOverlayWindowID: 77), 77)
   }
 
   func testCameraRecorderBeginResultDispatchesBeginCaptureToMain() {
@@ -582,7 +766,7 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     XCTAssertEqual(scene.cameraParams?.layoutPreset, .overlayBottomRight)
   }
 
-  func testRecordingSceneInfoFlagsAdvancedCameraExportStylingAsUnsupported() throws {
+  func testRecordingSceneInfoExposesFeatureLevelCameraExportCapabilities() throws {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
@@ -626,9 +810,15 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let payload = try XCTUnwrap(scenePayload as? [String: Any])
     XCTAssertEqual(payload["cameraPath"] as? String, cameraURL.path)
     XCTAssertEqual(payload["supportsAdvancedCameraExportStyling"] as? Bool, false)
+    let capabilities = try XCTUnwrap(payload["cameraExportCapabilities"] as? [String: Bool])
+    XCTAssertEqual(capabilities["shapeMask"], true)
+    XCTAssertEqual(capabilities["cornerRadius"], true)
+    XCTAssertEqual(capabilities["border"], true)
+    XCTAssertEqual(capabilities["shadow"], true)
+    XCTAssertEqual(capabilities["chromaKey"], false)
   }
 
-  func testSeparateCameraExportSanitizesUnsupportedAdvancedStyling() {
+  func testSeparateCameraExportSanitizesOnlyUnsupportedChromaKeyStyling() {
     let params = CameraCompositionParams(
       visible: true,
       layoutPreset: .overlayBottomRight,
@@ -654,15 +844,49 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       cameraPath: "/tmp/recording.camera.mov"
     )
 
-    XCTAssertEqual(sanitized?.shape, .square)
-    XCTAssertEqual(sanitized?.cornerRadius, 0.0)
-    XCTAssertEqual(sanitized?.borderWidth, 0.0)
-    XCTAssertNil(sanitized?.borderColorArgb)
-    XCTAssertEqual(sanitized?.shadowPreset, 0)
+    XCTAssertEqual(sanitized?.shape, params.shape)
+    XCTAssertEqual(sanitized?.cornerRadius, params.cornerRadius)
+    XCTAssertEqual(sanitized?.borderWidth, params.borderWidth)
+    XCTAssertEqual(sanitized?.borderColorArgb, params.borderColorArgb)
+    XCTAssertEqual(sanitized?.shadowPreset, params.shadowPreset)
     XCTAssertEqual(sanitized?.chromaKeyEnabled, false)
     XCTAssertNil(sanitized?.chromaKeyColorArgb)
+    XCTAssertEqual(sanitized?.chromaKeyStrength, 0.4)
     XCTAssertEqual(sanitized?.opacity, params.opacity)
     XCTAssertEqual(sanitized?.mirror, params.mirror)
+  }
+
+  func testSeparateCameraRecorderFailureStopsCaptureAndStoresFailure() {
+    let prefs = PreferencesStore()
+    let originalOverlayEnabled = prefs.overlayEnabled
+    let originalOverlayLinked = prefs.overlayLinked
+    let originalCameraCaptureMode = prefs.cameraCaptureMode
+    defer {
+      prefs.overlayEnabled = originalOverlayEnabled
+      prefs.overlayLinked = originalOverlayLinked
+      prefs.cameraCaptureMode = originalCameraCaptureMode
+    }
+
+    prefs.overlayEnabled = true
+    prefs.overlayLinked = true
+    prefs.cameraCaptureMode = .separateCameraAsset
+
+    let facade = ScreenRecorderFacade()
+    let backend = MockCaptureBackend()
+    backend.supportsLiveOverlayExclusionDuringSeparateCameraCapture = true
+    facade._testSetCaptureBackend(backend)
+    facade._testSetRecorderState(.recording)
+
+    facade._testHandleSeparateCameraRecorderFailure(
+      FlutterError(code: NativeErrorCode.recordingError, message: "camera failed", details: nil)
+    )
+
+    XCTAssertEqual(backend.stopCallCount, 1)
+    XCTAssertEqual(facade._testPendingSeparateCameraFailureCode(), NativeErrorCode.recordingError)
+    XCTAssertEqual(
+      (facade._testTerminalRecordingError(screenError: nil) as? FlutterError)?.message,
+      "camera failed"
+    )
   }
 
   private func makeTemporaryDirectory() -> URL {

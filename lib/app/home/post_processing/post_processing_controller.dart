@@ -101,7 +101,8 @@ class PostProcessingController extends ChangeNotifier {
   double _audioVolumePercent = 100.0;
   String? _cameraPath;
   CameraCompositionState? _cameraState;
-  bool _supportsAdvancedCameraExportStyling = true;
+  CameraExportCapabilities _cameraExportCapabilities =
+      const CameraExportCapabilities.allSupported();
   final AudioDebouncer _audioPreviewDebouncer = AudioDebouncer(
     delay: Duration(milliseconds: 150),
   );
@@ -131,8 +132,10 @@ class PostProcessingController extends ChangeNotifier {
   String? get cameraPath => _cameraPath;
   bool get hasCameraAsset => _cameraPath != null && _cameraPath!.isNotEmpty;
   CameraCompositionState? get cameraState => _cameraState;
+  CameraExportCapabilities get cameraExportCapabilities =>
+      _cameraExportCapabilities;
   bool get supportsAdvancedCameraExportStyling =>
-      _supportsAdvancedCameraExportStyling;
+      _cameraExportCapabilities.supportsAdvancedStyling;
 
   // Computed error state
   bool get hasError => _player.blockingError != null;
@@ -391,7 +394,7 @@ class PostProcessingController extends ChangeNotifier {
     _audioVolumePercent = _settings.post.postAudioVolumePercent;
     _cameraPath = null;
     _cameraState = null;
-    _supportsAdvancedCameraExportStyling = true;
+    _cameraExportCapabilities = const CameraExportCapabilities.allSupported();
     _hasExportedCurrentRecording = false;
   }
 
@@ -403,8 +406,7 @@ class PostProcessingController extends ChangeNotifier {
       }
       _cameraPath = sceneInfo.cameraPath;
       _cameraState = sceneInfo.camera;
-      _supportsAdvancedCameraExportStyling =
-          sceneInfo.supportsAdvancedCameraExportStyling;
+      _cameraExportCapabilities = sceneInfo.cameraExportCapabilities;
       notifyListeners();
       await applyProcessing();
     } catch (e, st) {

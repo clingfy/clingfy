@@ -107,7 +107,7 @@ class PostProcessingSidebar extends StatelessWidget {
   final bool cursorAvailable;
   final bool hasAudio;
   final bool hasCameraAsset;
-  final bool supportsAdvancedCameraExportStyling;
+  final CameraExportCapabilities cameraExportCapabilities;
   final CameraCompositionState? cameraState;
   final String? disabledMessage;
   final bool showHeader;
@@ -186,7 +186,7 @@ class PostProcessingSidebar extends StatelessWidget {
     required this.onZoomFactorChangeEnd,
     required this.onPickImage,
     required this.hasCameraAsset,
-    required this.supportsAdvancedCameraExportStyling,
+    required this.cameraExportCapabilities,
     required this.cameraState,
     required this.onCameraVisibleChanged,
     required this.onCameraLayoutPresetChanged,
@@ -284,8 +284,7 @@ class PostProcessingSidebar extends StatelessWidget {
     return [
       PostCameraSection(
         hasCameraAsset: hasCameraAsset,
-        supportsAdvancedCameraExportStyling:
-            supportsAdvancedCameraExportStyling,
+        cameraExportCapabilities: cameraExportCapabilities,
         cameraState: cameraState,
         onVisibleChanged: onCameraVisibleChanged,
         onLayoutPresetChanged: onCameraLayoutPresetChanged,

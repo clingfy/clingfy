@@ -58,7 +58,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
         double volume,
         bool hasCameraAsset,
         CameraCompositionState? cameraState,
-        bool supportsAdvancedCameraExportStyling,
+        CameraExportCapabilities cameraExportCapabilities,
       })
     >(
       selector: (_, p) => (
@@ -75,8 +75,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
         volume: p.audioVolumePercent,
         hasCameraAsset: p.hasCameraAsset,
         cameraState: p.cameraState,
-        supportsAdvancedCameraExportStyling:
-            p.supportsAdvancedCameraExportStyling,
+        cameraExportCapabilities: p.cameraExportCapabilities,
       ),
       builder: (context, vm, _) {
         final post = context.read<PostProcessingController>();
@@ -105,8 +104,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
           zoomFactor: vm.zoom,
           hasCameraAsset: vm.hasCameraAsset,
           cameraState: vm.cameraState,
-          supportsAdvancedCameraExportStyling:
-              vm.supportsAdvancedCameraExportStyling,
+          cameraExportCapabilities: vm.cameraExportCapabilities,
           audioGainDb: vm.gain,
           audioVolume: vm.volume,
           autoNormalizeOnExport:

@@ -497,7 +497,8 @@ final class CompositionBuilder {
     cameraAsset: AVAsset?,
     params: CompositionParams,
     cameraParams: CameraCompositionParams?,
-    cursorRecording: CursorRecording?
+    cursorRecording: CursorRecording?,
+    cameraAssetIsPreStyled: Bool = false
   ) -> ExportCompositionResult? {
     if let cameraAsset,
       let cameraParams,
@@ -509,7 +510,8 @@ final class CompositionBuilder {
         cameraAsset: cameraAsset,
         params: params,
         cameraParams: cameraParams,
-        cursorRecording: cursorRecording
+        cursorRecording: cursorRecording,
+        cameraAssetIsPreStyled: cameraAssetIsPreStyled
       )
     }
 
@@ -526,6 +528,82 @@ final class CompositionBuilder {
     }
 
     return ExportCompositionResult(asset: asset, videoComposition: composition)
+  }
+
+  func buildStyledCameraIntermediate(
+    asset: AVAsset,
+    canvasSize: CGSize,
+    params: CameraCompositionParams,
+    fpsHint: Int32
+  ) -> ExportCompositionResult? {
+    guard params.visible, params.layoutPreset != .hidden else { return nil }
+    guard let cameraTrack = asset.tracks(withMediaType: .video).first else { return nil }
+
+    let cameraResolution = CameraLayoutResolver.effectiveFrame(
+      canvasSize: canvasSize,
+      params: params
+    )
+    guard cameraResolution.shouldRender else { return nil }
+
+    let renderSize = CGSize(
+      width: max(1.0, ceil(cameraResolution.frame.width)),
+      height: max(1.0, ceil(cameraResolution.frame.height))
+    )
+
+    let composition = AVMutableComposition()
+
+    do {
+      guard
+        let composedCameraTrack = composition.addMutableTrack(
+          withMediaType: .video,
+          preferredTrackID: kCMPersistentTrackID_Invalid
+        )
+      else {
+        return nil
+      }
+
+      try composedCameraTrack.insertTimeRange(
+        CMTimeRange(start: .zero, duration: asset.duration),
+        of: cameraTrack,
+        at: .zero
+      )
+
+      let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: composedCameraTrack)
+      let destinationRect = CGRect(origin: .zero, size: renderSize)
+      layerInstruction.setTransform(
+        fittedTransform(
+          for: cameraTrack,
+          sourceSize: orientedSize(cameraTrack),
+          destinationRect: destinationRect,
+          fitMode: params.contentMode == .fit ? "fit" : "fill",
+          mirror: params.mirror
+        ),
+        at: .zero
+      )
+
+      let instruction = AVMutableVideoCompositionInstruction()
+      instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+      instruction.layerInstructions = [layerInstruction]
+
+      let videoComposition = AVMutableVideoComposition()
+      videoComposition.renderSize = renderSize
+      videoComposition.frameDuration = CMTime(value: 1, timescale: max(1, fpsHint))
+      videoComposition.instructions = [instruction]
+      configureStyledCameraAnimationTool(
+        composition: videoComposition,
+        renderSize: renderSize,
+        params: params
+      )
+
+      return ExportCompositionResult(asset: composition, videoComposition: videoComposition)
+    } catch {
+      NativeLogger.e(
+        "Export",
+        "Failed to build styled camera intermediate",
+        context: ["error": error.localizedDescription]
+      )
+      return nil
+    }
   }
 
   // For Preview
@@ -662,7 +740,8 @@ final class CompositionBuilder {
     cameraAsset: AVAsset,
     params: CompositionParams,
     cameraParams: CameraCompositionParams,
-    cursorRecording: CursorRecording?
+    cursorRecording: CursorRecording?,
+    cameraAssetIsPreStyled: Bool
   ) -> ExportCompositionResult? {
     guard let screenTrack = screenAsset.tracks(withMediaType: .video).first else { return nil }
 
@@ -760,14 +839,14 @@ final class CompositionBuilder {
             assetTrack: composedCameraTrack
           )
           let cameraFitMode: String =
-            cameraParams.contentMode == .fit ? "fit" : "fill"
+            cameraAssetIsPreStyled ? "fit" : (cameraParams.contentMode == .fit ? "fit" : "fill")
           cameraLayerInstruction.setTransform(
             fittedTransform(
               for: cameraTrack,
               sourceSize: orientedSize(cameraTrack),
               destinationRect: cameraResolution.frame,
               fitMode: cameraFitMode,
-              mirror: cameraParams.mirror
+              mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
             ),
             at: .zero
           )
@@ -815,6 +894,52 @@ final class CompositionBuilder {
       )
       return nil
     }
+  }
+
+  private func configureStyledCameraAnimationTool(
+    composition: AVMutableVideoComposition,
+    renderSize: CGSize,
+    params: CameraCompositionParams
+  ) {
+    let bounds = CGRect(origin: .zero, size: renderSize)
+
+    let parentLayer = CALayer()
+    parentLayer.frame = bounds
+    parentLayer.backgroundColor = NSColor.clear.cgColor
+
+    let cameraContainerLayer = CALayer()
+    cameraContainerLayer.frame = bounds
+    cameraContainerLayer.backgroundColor = NSColor.clear.cgColor
+    parentLayer.addSublayer(cameraContainerLayer)
+
+    let videoLayer = CALayer()
+    videoLayer.frame = bounds
+    videoLayer.backgroundColor = NSColor.clear.cgColor
+    cameraContainerLayer.addSublayer(videoLayer)
+
+    let maskPath = CameraLayoutResolver.maskPath(in: bounds, params: params)
+    let maskLayer = CAShapeLayer()
+    maskLayer.frame = bounds
+    maskLayer.path = maskPath
+    cameraContainerLayer.mask = maskLayer
+
+    let borderWidth = max(0.0, CGFloat(params.borderWidth))
+    if borderWidth > 0 {
+      let borderLayer = CAShapeLayer()
+      borderLayer.frame = bounds
+      borderLayer.path = maskPath
+      borderLayer.fillColor = NSColor.clear.cgColor
+      borderLayer.lineWidth = borderWidth
+      borderLayer.strokeColor = cameraColor(from: params.borderColorArgb).cgColor
+      cameraContainerLayer.addSublayer(borderLayer)
+    }
+
+    applyCameraShadow(to: cameraContainerLayer, params: params, path: maskPath)
+
+    composition.animationTool = AVVideoCompositionCoreAnimationTool(
+      postProcessingAsVideoLayer: videoLayer,
+      in: parentLayer
+    )
   }
 
   private func fittedTransform(
@@ -923,6 +1048,47 @@ final class CompositionBuilder {
       postProcessingAsVideoLayer: videoLayer,
       in: parentLayer
     )
+  }
+
+  private func cameraColor(from argb: Int?) -> NSColor {
+    guard let argb else { return .white }
+    let a = CGFloat((argb >> 24) & 0xFF) / 255.0
+    let r = CGFloat((argb >> 16) & 0xFF) / 255.0
+    let g = CGFloat((argb >> 8) & 0xFF) / 255.0
+    let b = CGFloat(argb & 0xFF) / 255.0
+    return NSColor(red: r, green: g, blue: b, alpha: a)
+  }
+
+  private func applyCameraShadow(
+    to layer: CALayer,
+    params: CameraCompositionParams,
+    path: CGPath
+  ) {
+    switch params.shadowPreset {
+    case 1:
+      layer.shadowColor = NSColor.black.cgColor
+      layer.shadowOpacity = 0.18
+      layer.shadowRadius = 10
+      layer.shadowOffset = CGSize(width: 0, height: -2)
+    case 2:
+      layer.shadowColor = NSColor.black.cgColor
+      layer.shadowOpacity = 0.24
+      layer.shadowRadius = 16
+      layer.shadowOffset = CGSize(width: 0, height: -4)
+    case 3:
+      layer.shadowColor = NSColor.black.cgColor
+      layer.shadowOpacity = 0.32
+      layer.shadowRadius = 22
+      layer.shadowOffset = CGSize(width: 0, height: -6)
+    default:
+      layer.shadowOpacity = 0.0
+      layer.shadowRadius = 0.0
+      layer.shadowOffset = .zero
+      layer.shadowPath = nil
+      return
+    }
+
+    layer.shadowPath = path
   }
 
   private func scaledRenderSize(for size: CGSize, scale: CGFloat) -> CGSize {

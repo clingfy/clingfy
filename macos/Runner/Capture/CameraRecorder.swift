@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import FlutterMacOS
 
 struct CameraRecordingMetadata: Codable, Equatable {
   struct Dimensions: Codable, Equatable {
@@ -222,6 +223,8 @@ final class CameraRecorder: NSObject {
   private let coordinator: CameraCaptureCoordinator
   private let fileManager: FileManager
 
+  var onFailure: ((FlutterError) -> Void)?
+
   private var recordingSession: CameraRecordingSession?
   private var activeSegment: ActiveCameraSegment?
   private var pendingStartCompletion: ((Result<Void, Error>) -> Void)?
@@ -412,6 +415,22 @@ final class CameraRecorder: NSObject {
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     return formatter.string(from: date)
   }
+
+  private static func recordingFinishedSuccessfully(_ error: Error?) -> Bool {
+    guard let nsError = error as NSError? else { return true }
+    return (nsError.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool) == true
+  }
+
+  private static func flutterFailure(from error: Error) -> FlutterError {
+    (error as? FlutterError)
+      ?? flutterError(NativeErrorCode.recordingError, error.localizedDescription)
+  }
+
+#if DEBUG
+  static func _testRecordingFinishedSuccessfully(_ error: NSError?) -> Bool {
+    recordingFinishedSuccessfully(error)
+  }
+#endif
 }
 
 extension CameraRecorder: AVCaptureFileOutputRecordingDelegate {
@@ -431,13 +450,39 @@ extension CameraRecorder: AVCaptureFileOutputRecordingDelegate {
     from connections: [AVCaptureConnection],
     error: Error?
   ) {
-    if let error {
+    let nsError = error as NSError?
+    let recordingFinishedSuccessfully = Self.recordingFinishedSuccessfully(error)
+    var finishContext: [String: Any] = [
+      "path": outputFileURL.path,
+      "hasError": error != nil,
+      "recordingFinishedSuccessfully": recordingFinishedSuccessfully,
+    ]
+    if let nsError {
+      finishContext["errorDomain"] = nsError.domain
+      finishContext["errorCode"] = nsError.code
+      finishContext["errorDescription"] = nsError.localizedDescription
+      finishContext["errorUserInfo"] = "\(nsError.userInfo)"
+    }
+    NativeLogger.i("CameraRecorder", "Camera segment finished", context: finishContext)
+
+    if let error, !recordingFinishedSuccessfully {
+      let shouldNotifyFailure =
+        pendingStartCompletion == nil && pendingPauseCompletion == nil && pendingStopCompletion == nil
+      let flutterFailure = Self.flutterFailure(from: error)
+
       pendingStartCompletion?(.failure(error))
       pendingPauseCompletion?(.failure(error))
       if let completion = pendingStopCompletion {
         completion(.failure(error))
       }
       finishWithFailure(error)
+
+      if shouldNotifyFailure {
+        let failureHandler = onFailure
+        DispatchQueue.main.async {
+          failureHandler?(flutterFailure)
+        }
+      }
       return
     }
 
@@ -458,7 +503,7 @@ extension CameraRecorder: AVCaptureFileOutputRecordingDelegate {
 
     NativeLogger.i(
       "CameraRecorder",
-      "Camera segment finished",
+      "Camera segment committed",
       context: ["path": outputFileURL.path, "segments": session.segments.count]
     )
 

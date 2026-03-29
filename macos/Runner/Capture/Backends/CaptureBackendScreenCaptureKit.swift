@@ -177,6 +177,41 @@ private final class AssetExportSessionBox: @unchecked Sendable {
   }
 }
 
+enum ScreenCaptureKitOverlayFilterPolicy {
+  struct WindowRecord: Equatable {
+    let windowID: CGWindowID
+    let bundleIdentifier: String?
+  }
+
+  static func excludedWindowIDs(
+    windows: [WindowRecord],
+    selfBundleIdentifier: String?,
+    overlayWindowID: CGWindowID?,
+    excludeRecorderApp: Bool,
+    excludeCameraOverlayWindow: Bool
+  ) -> [CGWindowID] {
+    var excluded = Set<CGWindowID>()
+
+    if excludeRecorderApp, let selfBundleIdentifier {
+      for window in windows where window.bundleIdentifier == selfBundleIdentifier {
+        if !excludeCameraOverlayWindow,
+          let overlayWindowID,
+          window.windowID == overlayWindowID
+        {
+          continue
+        }
+        excluded.insert(window.windowID)
+      }
+    }
+
+    if excludeCameraOverlayWindow, let overlayWindowID {
+      excluded.insert(overlayWindowID)
+    }
+
+    return excluded.sorted()
+  }
+}
+
 private enum RecordingSegmentMerger {
   static func mergeSegments(
     _ segmentURLs: [URL],
@@ -379,6 +414,7 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
   var onMicrophoneLevel: ((MicrophoneLevelSample) -> Void)?
 
   var canPauseResume: Bool { true }
+  var supportsLiveOverlayExclusionDuringSeparateCameraCapture: Bool { true }
   var isRecording: Bool { recordingURL != nil && didStart }
   var isPaused: Bool { paused }
   var currentOutputURL: URL? { recordingURL }
@@ -584,7 +620,9 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
       let initialOverlayWindowID = currentOverlayWindowID
       let built = try buildContentFilter(
         for: config.target, content: content, excludeRecorderApp: config.excludeRecorderApp,
-        cameraOverlayWindowID: initialOverlayWindowID)
+        cameraOverlayWindowID: initialOverlayWindowID,
+        excludeCameraOverlayWindow: config.excludeCameraOverlayWindow
+      )
       let filter = built.filter
       let sourceRect = built.sourceRect
 
@@ -1269,7 +1307,8 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
             for: config.target,
             content: content,
             excludeRecorderApp: config.excludeRecorderApp,
-            cameraOverlayWindowID: requestedWindowID
+            cameraOverlayWindowID: requestedWindowID,
+            excludeCameraOverlayWindow: config.excludeCameraOverlayWindow
           )
 
           try await stream.updateContentFilter(built.filter)
@@ -1386,11 +1425,35 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
     }
   }
 
+  private func excludedWindows(
+    from content: SCShareableContent,
+    overlayWindowID: CGWindowID?,
+    excludeRecorderApp: Bool,
+    excludeCameraOverlayWindow: Bool
+  ) -> [SCWindow] {
+    let windowRecords = content.windows.map {
+      ScreenCaptureKitOverlayFilterPolicy.WindowRecord(
+        windowID: $0.windowID,
+        bundleIdentifier: $0.owningApplication?.bundleIdentifier
+      )
+    }
+    let excludedWindowIDs = ScreenCaptureKitOverlayFilterPolicy.excludedWindowIDs(
+      windows: windowRecords,
+      selfBundleIdentifier: Bundle.main.bundleIdentifier,
+      overlayWindowID: overlayWindowID,
+      excludeRecorderApp: excludeRecorderApp,
+      excludeCameraOverlayWindow: excludeCameraOverlayWindow
+    )
+    let excludedWindowIDSet = Set(excludedWindowIDs)
+    return content.windows.filter { excludedWindowIDSet.contains($0.windowID) }
+  }
+
   private func buildContentFilter(
     for target: CaptureTarget,
     content: SCShareableContent,
     excludeRecorderApp: Bool,
-    cameraOverlayWindowID: CGWindowID?
+    cameraOverlayWindowID: CGWindowID?,
+    excludeCameraOverlayWindow: Bool
   ) throws -> (filter: SCContentFilter, sourceRect: CGRect?, sourceSize: CGSize) {
 
     switch target.mode {
@@ -1400,7 +1463,7 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
       }
       let scWindow = try resolveSCWindow(windowID: windowID, in: content)
 
-      if let overlayID = cameraOverlayWindowID {
+      if let overlayID = cameraOverlayWindowID, !excludeCameraOverlayWindow {
         // Option 1: Display-based capture + crop to target app window.
         // We include both the target app and our own app, but filter out other recorder windows.
         let display = try resolveSCDisplay(displayID: target.displayID, in: content)
@@ -1452,26 +1515,13 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
         return (filter, target.cropRect, size)
       */
       let display = try resolveSCDisplay(displayID: target.displayID, in: content)
-
-      // Exclude ONLY recorder windows; keep overlay if present.
-      let winsToExclude =
-        excludeRecorderApp
-        ? selfAppWindows(toExclude: cameraOverlayWindowID, from: content)
-        : []
-
-      // If camera overlay is active, except it from exclusion
-      var exceptions: [SCWindow] = []
-      if let overlayID = cameraOverlayWindowID,
-        let win = content.windows.first(where: { $0.windowID == overlayID })
-      {
-        exceptions.append(win)
-      }
-
-      let filter = SCContentFilter(
-        display: display,
-        excludingWindows: winsToExclude,
-        // exceptingWindows: exceptions  // might be this line needs to be commented out
+      let winsToExclude = excludedWindows(
+        from: content,
+        overlayWindowID: cameraOverlayWindowID,
+        excludeRecorderApp: excludeRecorderApp,
+        excludeCameraOverlayWindow: excludeCameraOverlayWindow
       )
+      let filter = SCContentFilter(display: display, excludingWindows: winsToExclude)
       // For area recording, sourceSize is the cropRect size if available, else display size
       let sourceSize = target.cropRect?.size ?? CGSize(width: display.width, height: display.height)
       return (filter, target.cropRect, sourceSize)
@@ -1498,13 +1548,12 @@ final class CaptureBackendScreenCaptureKit: NSObject, CaptureBackend {
       return (filter, nil, CGSize(width: display.width, height: display.height))
       */
       let display = try resolveSCDisplay(displayID: target.displayID, in: content)
-
-      // Exclude ONLY recorder windows; keep overlay if present.
-      let winsToExclude =
-        excludeRecorderApp
-        ? selfAppWindows(toExclude: cameraOverlayWindowID, from: content)
-        : []
-
+      let winsToExclude = excludedWindows(
+        from: content,
+        overlayWindowID: cameraOverlayWindowID,
+        excludeRecorderApp: excludeRecorderApp,
+        excludeCameraOverlayWindow: excludeCameraOverlayWindow
+      )
       let filter = SCContentFilter(display: display, excludingWindows: winsToExclude)
 
       let sourceSize = target.cropRect?.size ?? CGSize(width: display.width, height: display.height)

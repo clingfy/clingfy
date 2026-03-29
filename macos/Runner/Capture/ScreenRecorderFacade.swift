@@ -648,6 +648,7 @@ final class ScreenRecorderFacade: NSObject {
   // Metadata for current recording session (written on start, updated on finish)
   private var pendingMetadata: RecordingMetadata?
   private var pendingCameraRecordingSession: CameraRecordingSession?
+  private var pendingSeparateCameraFailure: FlutterError?
   private var currentRawURL: URL?
   private var activeRecordingFileSession: RecordingFileSession?
 
@@ -704,6 +705,9 @@ final class ScreenRecorderFacade: NSObject {
       self?.onCameraOverlayMoved?(
         ["normalizedX": normalizedX, "normalizedY": normalizedY]
       )
+    }
+    cameraRecorder.onFailure = { [weak self] error in
+      self?.handleSeparateCameraRecorderFailure(error)
     }
 
     setCaptureBackend(CaptureBackendAVFoundation())
@@ -936,12 +940,9 @@ final class ScreenRecorderFacade: NSObject {
         ])
 
       let needsOverlay = self.effectiveOverlayEnabledForRecording && self.prefs.overlayLinked
+      let backend = CaptureBackendFactory.make(for: target)
+      self.setCaptureBackend(backend)
       let startScreenCapture: (CGWindowID?) -> Void = { overlayID in
-        let effectiveOverlayID =
-          self.shouldRecordSeparateCameraAsset
-          ? nil
-          : overlayID
-
         let beginCapture = {
           self.suppressOverlayWindowDuringSeparateCameraCapture = self.shouldSuppressOverlayWindowDuringCapture
           self.updateOverlayVisibility()
@@ -949,7 +950,7 @@ final class ScreenRecorderFacade: NSObject {
             target: target,
             frameRate: frameRate,
             outputURL: outputURL,
-            overlayID: effectiveOverlayID,
+            overlayID: overlayID,
             systemAudioEnabled: systemAudioEnabled
           )
         }
@@ -1115,9 +1116,6 @@ final class ScreenRecorderFacade: NSObject {
       effectiveOverlayID: effectiveOverlayID,
       systemAudioEnabled: systemAudioEnabled
     )
-
-    let backend = CaptureBackendFactory.make(for: target)
-    self.setCaptureBackend(backend)
     self.capture.start(config: cfg)
   }
 
@@ -1136,7 +1134,8 @@ final class ScreenRecorderFacade: NSObject {
       includeSystemAudio: systemAudioEnabled,
       makeOutputURL: outputURL,
       excludeRecorderApp: prefs.excludeRecorderApp,
-      cameraOverlayWindowID: shouldRecordSeparateCameraAsset ? nil : effectiveOverlayID,
+      cameraOverlayWindowID: effectiveOverlayID,
+      excludeCameraOverlayWindow: shouldRecordSeparateCameraAsset,
       excludeMicFromSystemAudio: prefs.excludeMicFromSystemAudio
     )
   }
@@ -1922,8 +1921,50 @@ final class ScreenRecorderFacade: NSObject {
     )
   }
 
+  private struct CameraExportCapabilitySet {
+    let shapeMask: Bool
+    let cornerRadius: Bool
+    let border: Bool
+    let shadow: Bool
+    let chromaKey: Bool
+
+    var supportsAllAdvancedStyling: Bool {
+      shapeMask && cornerRadius && border && shadow && chromaKey
+    }
+
+    var payload: [String: Bool] {
+      [
+        "shapeMask": shapeMask,
+        "cornerRadius": cornerRadius,
+        "border": border,
+        "shadow": shadow,
+        "chromaKey": chromaKey,
+      ]
+    }
+  }
+
+  private func cameraExportCapabilities(for mediaSources: PreviewMediaSources) -> CameraExportCapabilitySet {
+    guard mediaSources.cameraPath?.isEmpty == false else {
+      return CameraExportCapabilitySet(
+        shapeMask: true,
+        cornerRadius: true,
+        border: true,
+        shadow: true,
+        chromaKey: true
+      )
+    }
+
+    return CameraExportCapabilitySet(
+      shapeMask: true,
+      cornerRadius: true,
+      border: true,
+      shadow: true,
+      chromaKey: false
+    )
+  }
+
   private func supportsAdvancedCameraExportStyling(for mediaSources: PreviewMediaSources) -> Bool {
-    mediaSources.cameraPath == nil
+    cameraExportCapabilities(for: mediaSources).supportsAllAdvancedStyling
   }
 
   private func exportSanitizedCameraParams(
@@ -1933,10 +1974,10 @@ final class ScreenRecorderFacade: NSObject {
     guard let params else { return nil }
     guard let cameraPath, !cameraPath.isEmpty else { return params }
 
-    if params.visible, params.layoutPreset != .hidden {
+    if params.visible, params.layoutPreset != .hidden, params.chromaKeyEnabled {
       NativeLogger.w(
         "Export",
-        "Separate camera export uses the supported geometry subset only; advanced camera styling remains preview-only",
+        "Separate camera export does not yet support chroma key; stripping chroma key fields for export",
         context: [
           "cameraPath": cameraPath,
           "layoutPreset": params.layoutPreset.rawValue,
@@ -1945,16 +1986,14 @@ final class ScreenRecorderFacade: NSObject {
           "borderWidth": params.borderWidth,
           "shadowPreset": params.shadowPreset,
           "chromaKeyEnabled": params.chromaKeyEnabled,
+          "chromaKeyStrength": params.chromaKeyStrength,
         ]
       )
     }
 
+    guard params.chromaKeyEnabled else { return params }
+
     var sanitized = params
-    sanitized.shape = .square
-    sanitized.cornerRadius = 0.0
-    sanitized.borderWidth = 0.0
-    sanitized.borderColorArgb = nil
-    sanitized.shadowPreset = 0
     sanitized.chromaKeyEnabled = false
     sanitized.chromaKeyStrength = 0.4
     sanitized.chromaKeyColorArgb = nil
@@ -1989,10 +2028,12 @@ final class ScreenRecorderFacade: NSObject {
     let components = resolvePreviewSceneComponents(source: source)
     let mediaSources = components.mediaSources
     let cameraParams = components.cameraParams
+    let exportCapabilities = cameraExportCapabilities(for: mediaSources)
 
     var payload: [String: Any] = [
       "screenPath": mediaSources.screenPath,
-      "supportsAdvancedCameraExportStyling": supportsAdvancedCameraExportStyling(for: mediaSources),
+      "supportsAdvancedCameraExportStyling": exportCapabilities.supportsAllAdvancedStyling,
+      "cameraExportCapabilities": exportCapabilities.payload,
     ]
     if let cameraPath = mediaSources.cameraPath {
       payload["cameraPath"] = cameraPath
@@ -2328,6 +2369,7 @@ final class ScreenRecorderFacade: NSObject {
     resetRecordingSessionSuppressions()
     activeRecordingFileSession = nil
     pendingCameraRecordingSession = nil
+    pendingSeparateCameraFailure = nil
     currentRawURL = nil
     pendingMetadata = nil
     if pendingStop {
@@ -2336,6 +2378,9 @@ final class ScreenRecorderFacade: NSObject {
       pendingStop = false
     }
     resolvePauseResumeSuccessIfNeeded()
+    applyIndicatorState()
+    updateOverlayVisibility()
+    updateCursorVisibility()
     activeRecordingWorkflowSessionId = nil
     startResult?(err)
     startResult = nil
@@ -2367,6 +2412,7 @@ final class ScreenRecorderFacade: NSObject {
 
   private var shouldSuppressOverlayWindowDuringCapture: Bool {
     shouldRecordSeparateCameraAsset
+      && !capture.supportsLiveOverlayExclusionDuringSeparateCameraCapture
   }
 
   private var effectiveCursorEnabledForRecording: Bool {
@@ -2378,6 +2424,7 @@ final class ScreenRecorderFacade: NSObject {
     sessionDisableCameraOverlay = false
     sessionDisableCursorHighlight = false
     suppressOverlayWindowDuringSeparateCameraCapture = false
+    pendingSeparateCameraFailure = nil
   }
 
   private func cameraRecordingDimensions(deviceID: String?) -> CameraRecordingMetadata.Dimensions? {
@@ -2717,13 +2764,29 @@ final class ScreenRecorderFacade: NSObject {
     }
   }
 
+  private func overlayWindowIDForCapture(liveOverlayWindowID: CGWindowID?) -> CGWindowID? {
+    guard shouldRecordSeparateCameraAsset else {
+      return liveOverlayWindowID
+    }
+
+    return capture.supportsLiveOverlayExclusionDuringSeparateCameraCapture
+      ? liveOverlayWindowID
+      : nil
+  }
+
   private func syncOverlayWindowIntoCaptureIfNeeded() {
     guard state == .recording else { return }
 
     if shouldRecordSeparateCameraAsset {
-      logOverlay("separate camera mode -> forcing capture.updateOverlay(nil)")
-      lastOverlayWindowID = nil
-      sendOverlayUpdateIfNeeded(nil)
+      let overlayWindowID = overlayWindowIDForCapture(liveOverlayWindowID: camera.overlayWindowID)
+      logOverlay(
+        "separate camera mode -> syncing overlay window for capture",
+        [
+          "windowID": overlayWindowID.map { String($0) } ?? "nil",
+          "backendSupportsLiveExclusion": "\(capture.supportsLiveOverlayExclusionDuringSeparateCameraCapture)",
+        ])
+      lastOverlayWindowID = overlayWindowID
+      sendOverlayUpdateIfNeeded(overlayWindowID)
       return
     }
 
@@ -2817,6 +2880,45 @@ final class ScreenRecorderFacade: NSObject {
           (error as? FlutterError)
             ?? flutterError(NativeErrorCode.recordingError, error.localizedDescription)
         )
+      }
+    }
+  }
+
+  private func terminalRecordingError(screenError: Error?) -> Error? {
+    if let screenError {
+      return screenError
+    }
+
+    return pendingSeparateCameraFailure
+  }
+
+  private func handleSeparateCameraRecorderFailure(_ error: FlutterError) {
+    runOnMainIfNeeded(reason: "cameraRecorder.onFailure", category: "Facade") { [weak self] in
+      guard let self else { return }
+      guard self.shouldRecordSeparateCameraAsset else { return }
+      guard self.pendingSeparateCameraFailure == nil else { return }
+
+      NativeLogger.e(
+        "Facade",
+        "Separate camera recording failed",
+        context: [
+          "state": "\(self.state)",
+          "error": error.message ?? error.code,
+        ])
+
+      self.pendingSeparateCameraFailure = error
+
+      switch self.state {
+      case .starting:
+        if self.capture.currentOutputURL != nil || self.capture.isRecording {
+          self.capture.stop()
+        } else {
+          self.finishStartWithError(error)
+        }
+      case .recording, .paused:
+        self.beginStoppingCapture()
+      case .stopping, .idle:
+        break
       }
     }
   }
@@ -3304,13 +3406,14 @@ final class ScreenRecorderFacade: NSObject {
 
     self.capture.onFinished = { [weak self] url, error in
       guard let self else { return }
+      let terminalError = self.terminalRecordingError(screenError: error)
 
       NativeLogger.i(
         "Facade", "Backend onFinished called",
         context: [
           "url": url?.path ?? "nil",
-          "hasError": error != nil,
-          "error": error?.localizedDescription ?? "nil",
+          "hasError": terminalError != nil,
+          "error": terminalError?.localizedDescription ?? "nil",
         ])
 
       let pendingStartResult = self.startResult
@@ -3349,14 +3452,25 @@ final class ScreenRecorderFacade: NSObject {
 
         self.completeRecordingLifecycle(
           finalURL: finalURL,
-          error: error,
+          error: terminalError,
           wasStarting: wasStarting,
           pendingStartResult: pendingStartResult,
           completion: completion
         )
       }
 
-      if error != nil {
+      if let terminalError {
+        if self.pendingSeparateCameraFailure != nil {
+          self.completeRecordingLifecycle(
+            finalURL: nil,
+            error: terminalError,
+            wasStarting: wasStarting,
+            pendingStartResult: pendingStartResult,
+            completion: completion
+          )
+          return
+        }
+
         if self.shouldRecordSeparateCameraAsset {
           self.cameraRecorder.stop { result in
             switch result {
@@ -3368,11 +3482,23 @@ final class ScreenRecorderFacade: NSObject {
                 "Camera recorder stop failed during screen failure fallback",
                 context: ["error": cameraError.localizedDescription]
               )
-              finalizeWithCameraResult(nil)
+              self.completeRecordingLifecycle(
+                finalURL: nil,
+                error: terminalError,
+                wasStarting: wasStarting,
+                pendingStartResult: pendingStartResult,
+                completion: completion
+              )
             }
           }
         } else {
-          finalizeWithCameraResult(nil)
+          self.completeRecordingLifecycle(
+            finalURL: nil,
+            error: terminalError,
+            wasStarting: wasStarting,
+            pendingStartResult: pendingStartResult,
+            completion: completion
+          )
         }
         return
       }
@@ -3387,12 +3513,18 @@ final class ScreenRecorderFacade: NSObject {
         case .success(let cameraResult):
           finalizeWithCameraResult(cameraResult)
         case .failure(let cameraError):
-          NativeLogger.w(
+          NativeLogger.e(
             "Facade",
-            "Camera recorder finalize failed; falling back to screen-only recording",
+            "Camera recorder finalize failed during separate-camera recording",
             context: ["error": cameraError.localizedDescription]
           )
-          finalizeWithCameraResult(nil)
+          self.completeRecordingLifecycle(
+            finalURL: nil,
+            error: cameraError,
+            wasStarting: wasStarting,
+            pendingStartResult: pendingStartResult,
+            completion: completion
+          )
         }
       }
     }
@@ -3518,6 +3650,10 @@ final class ScreenRecorderFacade: NSObject {
     shouldSuppressOverlayWindowDuringCapture
   }
 
+  func _testOverlayWindowIDForCapture(liveOverlayWindowID: CGWindowID?) -> CGWindowID? {
+    overlayWindowIDForCapture(liveOverlayWindowID: liveOverlayWindowID)
+  }
+
   func _testSetCaptureBackend(_ backend: CaptureBackend) {
     setCaptureBackend(backend)
   }
@@ -3553,6 +3689,18 @@ final class ScreenRecorderFacade: NSObject {
     runOverlayUITransitionOnMain(reason: "testOverlayUITransition", file: file, line: line) {
       operation(Thread.isMainThread)
     }
+  }
+
+  func _testHandleSeparateCameraRecorderFailure(_ error: FlutterError) {
+    handleSeparateCameraRecorderFailure(error)
+  }
+
+  func _testPendingSeparateCameraFailureCode() -> String? {
+    pendingSeparateCameraFailure?.code
+  }
+
+  func _testTerminalRecordingError(screenError: Error?) -> Error? {
+    terminalRecordingError(screenError: screenError)
   }
 #endif
 

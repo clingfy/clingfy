@@ -20,6 +20,7 @@ final class CaptureBackendAVFoundation: CaptureBackend {
   var onMicrophoneLevel: ((MicrophoneLevelSample) -> Void)?
 
   var canPauseResume: Bool { true }
+  var supportsLiveOverlayExclusionDuringSeparateCameraCapture: Bool { false }
   var isRecording: Bool {
     // AVCaptureMovieFileOutput reports recording state reliably.
     (pipeline.movieOutput?.isRecording ?? false) || (pipeline.movieOutput?.isRecordingPaused ?? false)

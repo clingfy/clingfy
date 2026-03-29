@@ -29,7 +29,8 @@ void main() {
     bool autoNormalizeOnExport = false,
     String? backgroundImagePath,
     bool hasCameraAsset = false,
-    bool supportsAdvancedCameraExportStyling = true,
+    CameraExportCapabilities cameraExportCapabilities =
+        const CameraExportCapabilities.allSupported(),
     CameraCompositionState? cameraState,
     void Function(double)? onZoomFactorChanged,
     void Function(double)? onZoomFactorChangeEnd,
@@ -81,8 +82,7 @@ void main() {
             onZoomFactorChangeEnd: onZoomFactorChangeEnd ?? (_) {},
             onPickImage: () async => null,
             hasCameraAsset: hasCameraAsset,
-            supportsAdvancedCameraExportStyling:
-                supportsAdvancedCameraExportStyling,
+            cameraExportCapabilities: cameraExportCapabilities,
             cameraState: cameraState,
             onCameraVisibleChanged: (_) {},
             onCameraLayoutPresetChanged: (_) {},
@@ -270,13 +270,19 @@ void main() {
     expect(find.text('No mic audio track found'), findsOneWidget);
   });
 
-  testWidgets('camera section shows preview-only notice for advanced styling', (
+  testWidgets('camera section shows chroma-key-only preview notice', (
     tester,
   ) async {
     await tester.pumpWidget(
       buildTestApp(
         hasCameraAsset: true,
-        supportsAdvancedCameraExportStyling: false,
+        cameraExportCapabilities: const CameraExportCapabilities(
+          shapeMask: true,
+          cornerRadius: true,
+          border: true,
+          shadow: true,
+          chromaKey: false,
+        ),
         cameraState: const CameraCompositionState.hidden().copyWith(
           visible: true,
           layoutPreset: CameraLayoutPreset.overlayBottomRight,
@@ -287,11 +293,36 @@ void main() {
 
     expect(
       find.text(
-        'Advanced camera styling is preview-only right now. Export keeps layout, size, opacity, mirror, and fit/fill.',
+        'Camera chroma key remains preview-only right now. Export supports shape, rounded corners, border, shadow, layout, size, opacity, mirror, and fit/fill.',
       ),
       findsOneWidget,
     );
+    expect(
+      find.text('No separate camera asset was recorded for this clip.'),
+      findsNothing,
+    );
   });
+
+  testWidgets(
+    'camera section shows no-camera notice only when asset is missing',
+    (tester) async {
+      await tester.pumpWidget(buildTestApp(hasCameraAsset: false));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('No separate camera asset was recorded for this clip.'),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(buildTestApp(hasCameraAsset: true));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('No separate camera asset was recorded for this clip.'),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets('effects tab exposes zoom and cursor helper copy as tooltips', (
     tester,
