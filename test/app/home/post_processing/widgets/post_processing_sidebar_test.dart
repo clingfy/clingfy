@@ -34,6 +34,9 @@ void main() {
     CameraCompositionState? cameraState,
     void Function(double)? onZoomFactorChanged,
     void Function(double)? onZoomFactorChangeEnd,
+    void Function(CameraZoomBehavior)? onCameraZoomBehaviorChanged,
+    void Function(double)? onCameraZoomScaleMultiplierChanged,
+    void Function(double)? onCameraZoomScaleMultiplierChangeEnd,
     void Function(String?)? onBackgroundImageChanged,
   }) {
     return MaterialApp(
@@ -93,6 +96,11 @@ void main() {
             onCameraCornerRadiusChangeEnd: (_) {},
             onCameraMirrorChanged: (_) {},
             onCameraContentModeChanged: (_) {},
+            onCameraZoomBehaviorChanged: onCameraZoomBehaviorChanged ?? (_) {},
+            onCameraZoomScaleMultiplierChanged:
+                onCameraZoomScaleMultiplierChanged ?? (_) {},
+            onCameraZoomScaleMultiplierChangeEnd:
+                onCameraZoomScaleMultiplierChangeEnd ?? (_) {},
             onCameraManualCenterXChanged: (_) {},
             onCameraManualCenterXChangeEnd: (_) {},
             onCameraManualCenterYChanged: (_) {},
@@ -303,34 +311,35 @@ void main() {
     );
   });
 
-  testWidgets('camera section hides chroma-key preview notice when export supports it', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      buildTestApp(
-        hasCameraAsset: true,
-        cameraExportCapabilities: const CameraExportCapabilities(
-          shapeMask: true,
-          cornerRadius: true,
-          border: true,
-          shadow: true,
-          chromaKey: true,
+  testWidgets(
+    'camera section hides chroma-key preview notice when export supports it',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTestApp(
+          hasCameraAsset: true,
+          cameraExportCapabilities: const CameraExportCapabilities(
+            shapeMask: true,
+            cornerRadius: true,
+            border: true,
+            shadow: true,
+            chromaKey: true,
+          ),
+          cameraState: const CameraCompositionState.hidden().copyWith(
+            visible: true,
+            layoutPreset: CameraLayoutPreset.overlayBottomRight,
+          ),
         ),
-        cameraState: const CameraCompositionState.hidden().copyWith(
-          visible: true,
-          layoutPreset: CameraLayoutPreset.overlayBottomRight,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(
-      find.text(
-        'Camera chroma key remains preview-only right now. Export supports shape, rounded corners, border, shadow, layout, size, opacity, mirror, and fit/fill.',
-      ),
-      findsNothing,
-    );
-  });
+      expect(
+        find.text(
+          'Camera chroma key remains preview-only right now. Export supports shape, rounded corners, border, shadow, layout, size, opacity, mirror, and fit/fill.',
+        ),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets(
     'camera section shows no-camera notice only when asset is missing',
@@ -350,6 +359,48 @@ void main() {
         find.text('No separate camera asset was recorded for this clip.'),
         findsNothing,
       );
+    },
+  );
+
+  testWidgets(
+    'camera section hides zoom scale slider when zoom response is fixed',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTestApp(
+          hasCameraAsset: true,
+          cameraState: const CameraCompositionState.hidden().copyWith(
+            visible: true,
+            layoutPreset: CameraLayoutPreset.overlayBottomRight,
+            zoomBehavior: CameraZoomBehavior.fixed,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Zoom Response'), findsOneWidget);
+      expect(find.text('Zoom Scale'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'camera section shows zoom scale slider when zoom response scales with zoom',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTestApp(
+          hasCameraAsset: true,
+          cameraState: const CameraCompositionState.hidden().copyWith(
+            visible: true,
+            layoutPreset: CameraLayoutPreset.overlayBottomRight,
+            zoomBehavior: CameraZoomBehavior.scaleWithScreenZoom,
+            zoomScaleMultiplier: 0.35,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Zoom Response'), findsOneWidget);
+      expect(find.text('Zoom Scale'), findsOneWidget);
+      expect(find.text('35%'), findsOneWidget);
     },
   );
 

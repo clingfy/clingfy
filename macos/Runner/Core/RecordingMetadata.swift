@@ -69,9 +69,100 @@ struct RecordingMetadata: Codable {
     var cameraMirror: Bool
     var cameraContentMode: CameraContentMode
     var cameraZoomBehavior: CameraZoomBehavior
+    var cameraZoomScaleMultiplier: Double
     var cameraChromaKeyEnabled: Bool
     var cameraChromaKeyStrength: Double
     var cameraChromaKeyColorArgb: Int?
+
+    init(
+      cameraVisible: Bool,
+      cameraLayoutPreset: CameraLayoutPreset,
+      cameraNormalizedCenter: NormalizedPoint?,
+      cameraSizeFactor: Double,
+      cameraShape: CameraShape,
+      cameraCornerRadius: Double,
+      cameraBorderWidth: Double,
+      cameraBorderColorArgb: Int?,
+      cameraShadow: Int,
+      cameraOpacity: Double,
+      cameraMirror: Bool,
+      cameraContentMode: CameraContentMode,
+      cameraZoomBehavior: CameraZoomBehavior,
+      cameraZoomScaleMultiplier: Double = 0.35,
+      cameraChromaKeyEnabled: Bool,
+      cameraChromaKeyStrength: Double,
+      cameraChromaKeyColorArgb: Int?
+    ) {
+      self.cameraVisible = cameraVisible
+      self.cameraLayoutPreset = cameraLayoutPreset
+      self.cameraNormalizedCenter = cameraNormalizedCenter
+      self.cameraSizeFactor = cameraSizeFactor
+      self.cameraShape = cameraShape
+      self.cameraCornerRadius = cameraCornerRadius
+      self.cameraBorderWidth = cameraBorderWidth
+      self.cameraBorderColorArgb = cameraBorderColorArgb
+      self.cameraShadow = cameraShadow
+      self.cameraOpacity = cameraOpacity
+      self.cameraMirror = cameraMirror
+      self.cameraContentMode = cameraContentMode
+      self.cameraZoomBehavior = cameraZoomBehavior
+      self.cameraZoomScaleMultiplier = cameraZoomScaleMultiplier
+      self.cameraChromaKeyEnabled = cameraChromaKeyEnabled
+      self.cameraChromaKeyStrength = cameraChromaKeyStrength
+      self.cameraChromaKeyColorArgb = cameraChromaKeyColorArgb
+    }
+
+    private enum CodingKeys: String, CodingKey {
+      case cameraVisible
+      case cameraLayoutPreset
+      case cameraNormalizedCenter
+      case cameraSizeFactor
+      case cameraShape
+      case cameraCornerRadius
+      case cameraBorderWidth
+      case cameraBorderColorArgb
+      case cameraShadow
+      case cameraOpacity
+      case cameraMirror
+      case cameraContentMode
+      case cameraZoomBehavior
+      case cameraZoomScaleMultiplier
+      case cameraChromaKeyEnabled
+      case cameraChromaKeyStrength
+      case cameraChromaKeyColorArgb
+    }
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      cameraVisible = try container.decode(Bool.self, forKey: .cameraVisible)
+      cameraLayoutPreset = try container.decode(CameraLayoutPreset.self, forKey: .cameraLayoutPreset)
+      cameraNormalizedCenter = try container.decodeIfPresent(
+        NormalizedPoint.self,
+        forKey: .cameraNormalizedCenter
+      )
+      cameraSizeFactor = try container.decode(Double.self, forKey: .cameraSizeFactor)
+      cameraShape = try container.decode(CameraShape.self, forKey: .cameraShape)
+      cameraCornerRadius = try container.decode(Double.self, forKey: .cameraCornerRadius)
+      cameraBorderWidth = try container.decode(Double.self, forKey: .cameraBorderWidth)
+      cameraBorderColorArgb = try container.decodeIfPresent(Int.self, forKey: .cameraBorderColorArgb)
+      cameraShadow = try container.decode(Int.self, forKey: .cameraShadow)
+      cameraOpacity = try container.decode(Double.self, forKey: .cameraOpacity)
+      cameraMirror = try container.decode(Bool.self, forKey: .cameraMirror)
+      cameraContentMode = try container.decode(CameraContentMode.self, forKey: .cameraContentMode)
+      cameraZoomBehavior = CameraZoomBehavior.from(
+        rawValue: try container.decodeIfPresent(String.self, forKey: .cameraZoomBehavior)
+      )
+      cameraZoomScaleMultiplier = try container.decodeIfPresent(
+        Double.self,
+        forKey: .cameraZoomScaleMultiplier
+      ) ?? 0.35
+      cameraChromaKeyEnabled = try container.decode(Bool.self, forKey: .cameraChromaKeyEnabled)
+      cameraChromaKeyStrength = try container.decode(Double.self, forKey: .cameraChromaKeyStrength)
+      cameraChromaKeyColorArgb = try container.decodeIfPresent(
+        Int.self,
+        forKey: .cameraChromaKeyColorArgb
+      )
+    }
   }
 
   let version: Int
@@ -192,6 +283,7 @@ private extension RecordingMetadata {
         cameraMirror: true,
         cameraContentMode: .fill,
         cameraZoomBehavior: .fixed,
+        cameraZoomScaleMultiplier: 0.35,
         cameraChromaKeyEnabled: false,
         cameraChromaKeyStrength: 0.4,
         cameraChromaKeyColorArgb: nil

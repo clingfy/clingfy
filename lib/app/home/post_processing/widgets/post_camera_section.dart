@@ -26,6 +26,9 @@ class PostCameraSection extends StatelessWidget {
     required this.onCornerRadiusChangeEnd,
     required this.onMirrorChanged,
     required this.onContentModeChanged,
+    required this.onZoomBehaviorChanged,
+    required this.onZoomScaleMultiplierChanged,
+    required this.onZoomScaleMultiplierChangeEnd,
     required this.onManualCenterXChanged,
     required this.onManualCenterXChangeEnd,
     required this.onManualCenterYChanged,
@@ -45,6 +48,9 @@ class PostCameraSection extends StatelessWidget {
   final ValueChanged<double> onCornerRadiusChangeEnd;
   final ValueChanged<bool> onMirrorChanged;
   final ValueChanged<CameraContentMode> onContentModeChanged;
+  final ValueChanged<CameraZoomBehavior> onZoomBehaviorChanged;
+  final ValueChanged<double> onZoomScaleMultiplierChanged;
+  final ValueChanged<double> onZoomScaleMultiplierChangeEnd;
   final ValueChanged<double> onManualCenterXChanged;
   final ValueChanged<double> onManualCenterXChangeEnd;
   final ValueChanged<double> onManualCenterYChanged;
@@ -169,6 +175,46 @@ class PostCameraSection extends StatelessWidget {
               },
             ),
           ),
+          const SizedBox(height: AppSidebarTokens.sectionGap),
+          AppFormRow(
+            label: 'Zoom Response',
+            control: PlatformDropdown<CameraZoomBehavior>(
+              value: camera.zoomBehavior,
+              items: const [
+                PlatformMenuItem(
+                  value: CameraZoomBehavior.fixed,
+                  label: 'Fixed',
+                ),
+                PlatformMenuItem(
+                  value: CameraZoomBehavior.scaleWithScreenZoom,
+                  label: 'Scale with Zoom',
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  onZoomBehaviorChanged(value);
+                }
+              },
+            ),
+          ),
+          if (camera.zoomBehavior ==
+              CameraZoomBehavior.scaleWithScreenZoom) ...[
+            const SizedBox(height: AppSidebarTokens.sectionGap),
+            AppSliderRow(
+              label: 'Zoom Scale',
+              valueText: '${(camera.zoomScaleMultiplier * 100).round()}%',
+              slider: _buildSidebarSlider(
+                context,
+                value: camera.zoomScaleMultiplier,
+                min: 0.0,
+                max: 1.0,
+                divisions: 100,
+                onChanged: onZoomScaleMultiplierChanged,
+                onChangeEnd: onZoomScaleMultiplierChangeEnd,
+                accentColor: accentColor,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSidebarTokens.sectionGap),
           AppToggleRow(
             title: l10n.mirrorSelfView,

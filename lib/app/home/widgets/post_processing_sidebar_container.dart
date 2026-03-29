@@ -135,6 +135,10 @@ class PostProcessingSidebarContainer extends StatelessWidget {
           onCameraCornerRadiusChangeEnd: post.setCameraCornerRadiusEnd,
           onCameraMirrorChanged: post.setCameraMirror,
           onCameraContentModeChanged: post.setCameraContentMode,
+          onCameraZoomBehaviorChanged: post.setCameraZoomBehavior,
+          onCameraZoomScaleMultiplierChanged: post.setCameraZoomScaleMultiplier,
+          onCameraZoomScaleMultiplierChangeEnd:
+              post.setCameraZoomScaleMultiplierEnd,
           onCameraManualCenterXChanged: post.setCameraManualCenterX,
           onCameraManualCenterXChangeEnd: post.setCameraManualCenterXEnd,
           onCameraManualCenterYChanged: post.setCameraManualCenterY,

@@ -1189,7 +1189,8 @@ final class InlinePreviewView: NSView {
     CATransaction.setDisableActions(true)
     defer { CATransaction.commit() }
     updateCursorLayer(tick: tickState)
-    updateZoom(tick: tickState)
+    let screenZoom = updateZoom(tick: tickState)
+    updateCameraPreviewGeometry(screenZoom: screenZoom)
 
     emitPlayerEvent([
       "type": "playerTick",
@@ -1558,6 +1559,35 @@ final class InlinePreviewView: NSView {
 
   private func updateCameraPreviewLayout() {
     guard
+      let cameraContainerLayer,
+      let cameraPlayerLayer
+    else {
+      return
+    }
+
+    guard
+      let params = currentCameraCompositionParams,
+      currentMediaSources?.cameraPath != nil,
+      cameraPlayer?.currentItem != nil
+    else {
+      cameraContainerLayer.isHidden = true
+      return
+    }
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    defer { CATransaction.commit() }
+    cameraPlayerLayer.videoGravity =
+      params.contentMode == .fit ? .resizeAspect : .resizeAspectFill
+    cameraPlayerLayer.setAffineTransform(
+      params.mirror ? CGAffineTransform(scaleX: -1.0, y: 1.0) : .identity
+    )
+    cameraContainerLayer.opacity = Float(max(0.0, min(1.0, params.opacity)))
+    updateCameraPreviewGeometry(screenZoom: smoothZoom)
+  }
+
+  private func updateCameraPreviewGeometry(screenZoom: CGFloat) {
+    guard
       let canvasSize = currentCompositionParams?.targetSize,
       let cameraContainerLayer,
       let cameraPlayerLayer
@@ -1574,28 +1604,27 @@ final class InlinePreviewView: NSView {
       return
     }
 
-    let resolution = CameraLayoutResolver.effectiveFrame(canvasSize: canvasSize, params: params)
-    guard resolution.shouldRender else {
+    let baseResolution = CameraLayoutResolver.effectiveFrame(
+      canvasSize: canvasSize,
+      params: params
+    )
+    let resolved = CameraTransformTimelineBuilder.resolve(
+      baseResolution: baseResolution,
+      cameraParams: params,
+      screenZoom: screenZoom
+    )
+    guard baseResolution.shouldRender else {
       cameraContainerLayer.isHidden = true
       return
     }
 
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    defer { CATransaction.commit() }
-
-    let frame = resolution.frame.integral
+    let frame = resolved.frame.integral
     cameraContainerLayer.isHidden = false
     cameraContainerLayer.frame = frame
     cameraContainerLayer.opacity = Float(max(0.0, min(1.0, params.opacity)))
 
     let bounds = CGRect(origin: .zero, size: frame.size)
     cameraPlayerLayer.frame = bounds
-    cameraPlayerLayer.videoGravity =
-      params.contentMode == .fit ? .resizeAspect : .resizeAspectFill
-    cameraPlayerLayer.setAffineTransform(
-      params.mirror ? CGAffineTransform(scaleX: -1.0, y: 1.0) : .identity
-    )
 
     let maskPath = CameraLayoutResolver.maskPath(in: bounds, params: params)
     let maskLayer = CAShapeLayer()
@@ -1728,7 +1757,8 @@ final class InlinePreviewView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     updateCursorLayer(tick: tick)
-    updateZoom(tick: tick, snap: snap)
+    let screenZoom = updateZoom(tick: tick, snap: snap)
+    updateCameraPreviewGeometry(screenZoom: screenZoom)
     CATransaction.commit()
   }
 
@@ -1794,7 +1824,8 @@ final class InlinePreviewView: NSView {
   }
 
   // MARK: - Update Zoom
-  private func updateZoom(tick: PreviewTickState, snap: Bool = false) {
+  @discardableResult
+  private func updateZoom(tick: PreviewTickState, snap: Bool = false) -> CGFloat {
     let time = tick.time
     // If time jumped backwards (replay/seek), reset hysteresis + zoom state
     if time + 0.0001 < lastZoomTime {
@@ -1819,12 +1850,12 @@ final class InlinePreviewView: NSView {
       let zoomedLayer = self.zoomedContentLayer
     else {
       self.zoomedContentLayer?.setAffineTransform(.identity)
-      return
+      return 1.0
     }
 
     guard let frame = tick.frame else {
       zoomedLayer.setAffineTransform(.identity)
-      return
+      return 1.0
     }
 
     let defID = defaultSpriteID ?? frame.spriteID
@@ -1832,7 +1863,7 @@ final class InlinePreviewView: NSView {
     let targetSize = params.targetSize
     guard targetSize.width > 0 && targetSize.height > 0 else {
       zoomedLayer.setAffineTransform(.identity)
-      return
+      return 1.0
     }
 
     let logicalContentFrame = layout.contentFrame
@@ -1955,6 +1986,7 @@ final class InlinePreviewView: NSView {
     t = t.translatedBy(x: -smoothCenterX, y: -smoothCenterY)
 
     zoomedLayer.setAffineTransform(t)
+    return smoothZoom
   }
 
   // MARK: - Helpers

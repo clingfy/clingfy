@@ -73,7 +73,8 @@ final class RecordingMetadataTests: XCTestCase {
       cameraOpacity: 0.8,
       cameraMirror: false,
       cameraContentMode: .fit,
-      cameraZoomBehavior: .scaleDownWhenScreenZooms,
+      cameraZoomBehavior: .scaleWithScreenZoom,
+      cameraZoomScaleMultiplier: 0.55,
       cameraChromaKeyEnabled: true,
       cameraChromaKeyStrength: 0.5,
       cameraChromaKeyColorArgb: 0xFF00FF00
@@ -101,6 +102,54 @@ final class RecordingMetadataTests: XCTestCase {
     XCTAssertEqual(decoded.screen.windowId, 77)
     XCTAssertEqual(decoded.camera, cameraInfo)
     XCTAssertEqual(decoded.editorSeed, editorSeed)
+  }
+
+  func testLegacyV2EditorSeedDefaultsCameraZoomFields() throws {
+    let metadata = RecordingMetadata.create(
+      rawURL: URL(fileURLWithPath: "/tmp/recording.mov"),
+      displayMode: .explicitID,
+      displayID: 123,
+      cropRect: nil,
+      frameRate: 60,
+      quality: .fhd,
+      cursorEnabled: true,
+      cursorLinked: true,
+      windowID: nil,
+      excludedRecorderApp: false,
+      camera: nil,
+      editorSeed: RecordingMetadata.EditorSeed(
+        cameraVisible: true,
+        cameraLayoutPreset: .overlayBottomRight,
+        cameraNormalizedCenter: nil,
+        cameraSizeFactor: 0.18,
+        cameraShape: .circle,
+        cameraCornerRadius: 0.0,
+        cameraBorderWidth: 0.0,
+        cameraBorderColorArgb: nil,
+        cameraShadow: 0,
+        cameraOpacity: 1.0,
+        cameraMirror: true,
+        cameraContentMode: .fill,
+        cameraZoomBehavior: .fixed,
+        cameraZoomScaleMultiplier: 0.35,
+        cameraChromaKeyEnabled: false,
+        cameraChromaKeyStrength: 0.4,
+        cameraChromaKeyColorArgb: nil
+      )
+    )
+
+    let encoded = try JSONEncoder().encode(metadata)
+    var json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    var editorSeed = try XCTUnwrap(json["editorSeed"] as? [String: Any])
+    editorSeed["cameraZoomBehavior"] = "scaleDownWhenScreenZooms"
+    editorSeed.removeValue(forKey: "cameraZoomScaleMultiplier")
+    json["editorSeed"] = editorSeed
+
+    let legacyData = try JSONSerialization.data(withJSONObject: json)
+    let decoded = try JSONDecoder().decode(RecordingMetadata.self, from: legacyData)
+
+    XCTAssertEqual(decoded.editorSeed.cameraZoomBehavior, .fixed)
+    XCTAssertEqual(decoded.editorSeed.cameraZoomScaleMultiplier, 0.35, accuracy: 0.0001)
   }
 
   func testLegacyMetadataReadMigratesToVersion2Schema() throws {
@@ -252,6 +301,135 @@ final class CameraLayoutResolverTests: XCTestCase {
     params.shape = .circle
     let circle = CameraLayoutResolver.maskPath(in: rect, params: params)
     XCTAssertEqual(circle.boundingBox, rect)
+  }
+}
+
+final class CameraTransformTimelineBuilderTests: XCTestCase {
+  func testFixedModeKeepsBaseFrameDuringZoom() {
+    let params = makeParams(behavior: .fixed, multiplier: 0.35)
+    let base = CameraLayoutResolver.effectiveFrame(
+      canvasSize: CGSize(width: 1000, height: 600),
+      params: params
+    )
+
+    let resolved = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.8
+    )
+
+    XCTAssertEqual(resolved.scale, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame, base.frame)
+  }
+
+  func testScaleWithScreenZoomUsesMultiplierAndPreservesCenter() {
+    let params = makeParams(behavior: .scaleWithScreenZoom, multiplier: 0.35)
+    let base = CameraLayoutResolver.effectiveFrame(
+      canvasSize: CGSize(width: 1000, height: 600),
+      params: params
+    )
+
+    let resolved = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.8
+    )
+
+    XCTAssertEqual(resolved.scale, 1.28, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame.midX, base.frame.midX, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame.midY, base.frame.midY, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame.width, base.frame.width * 1.28, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame.height, base.frame.height * 1.28, accuracy: 0.0001)
+  }
+
+  func testZeroMultiplierBehavesLikeFixed() {
+    let params = makeParams(behavior: .scaleWithScreenZoom, multiplier: 0.0)
+    let base = CameraLayoutResolver.effectiveFrame(
+      canvasSize: CGSize(width: 1000, height: 600),
+      params: params
+    )
+
+    let resolved = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 2.0
+    )
+
+    XCTAssertEqual(resolved.scale, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame, base.frame)
+  }
+
+  func testFullMultiplierFollowsScreenZoom() {
+    let params = makeParams(behavior: .scaleWithScreenZoom, multiplier: 1.0)
+    let scale = CameraTransformTimelineBuilder.resolvedScale(
+      layoutPreset: params.layoutPreset,
+      behavior: params.zoomBehavior,
+      multiplier: params.zoomScaleMultiplier,
+      screenZoom: 1.8
+    )
+
+    XCTAssertEqual(scale, 1.8, accuracy: 0.0001)
+  }
+
+  func testBackgroundBehindIgnoresZoomScaling() {
+    var params = makeParams(behavior: .scaleWithScreenZoom, multiplier: 1.0)
+    params.layoutPreset = .backgroundBehind
+    let base = CameraLayoutResolver.effectiveFrame(
+      canvasSize: CGSize(width: 1000, height: 600),
+      params: params
+    )
+
+    let resolved = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 2.0
+    )
+
+    XCTAssertEqual(resolved.scale, 1.0, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame, base.frame)
+  }
+
+  func testManualPositionPreservesCenterWhileScaling() {
+    var params = makeParams(behavior: .scaleWithScreenZoom, multiplier: 0.5)
+    params.normalizedCanvasCenter = CGPoint(x: 0.2, y: 0.8)
+    let base = CameraLayoutResolver.effectiveFrame(
+      canvasSize: CGSize(width: 1000, height: 600),
+      params: params
+    )
+
+    let resolved = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.6
+    )
+
+    XCTAssertEqual(resolved.frame.midX, base.frame.midX, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame.midY, base.frame.midY, accuracy: 0.0001)
+  }
+
+  private func makeParams(
+    behavior: CameraZoomBehavior,
+    multiplier: Double
+  ) -> CameraCompositionParams {
+    CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .circle,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: true,
+      contentMode: .fill,
+      zoomBehavior: behavior,
+      zoomScaleMultiplier: multiplier,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
   }
 }
 
@@ -535,6 +713,186 @@ final class LetterboxExporterTests: XCTestCase {
     XCTAssertGreaterThan(cropRatio, 0.05)
   }
 
+  func testScaleWithScreenZoomAddsCameraTransformRampsToExportComposition() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    let cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .scaleWithScreenZoom,
+      zoomScaleMultiplier: 0.35,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: makeZoomCursorRecording(),
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    var startTransform = CGAffineTransform.identity
+    var endTransform = CGAffineTransform.identity
+    var timeRange = CMTimeRange.zero
+
+    let hasRamp = cameraInstruction.getTransformRamp(
+      for: CMTime(seconds: 0.45, preferredTimescale: 600),
+      start: &startTransform,
+      end: &endTransform,
+      timeRange: &timeRange
+    )
+
+    XCTAssertTrue(hasRamp)
+    XCTAssertFalse(
+      transformsApproximatelyEqual(startTransform, endTransform),
+      "camera transform should vary during active zoom"
+    )
+    XCTAssertGreaterThan(timeRange.duration.seconds, 0.0)
+  }
+
+  func testFixedCameraZoomBehaviorKeepsStaticExportTransform() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    let cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      zoomScaleMultiplier: 0.35,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: makeZoomCursorRecording(),
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    var startTransform = CGAffineTransform.identity
+    var endTransform = CGAffineTransform.identity
+    var timeRange = CMTimeRange.zero
+
+    let hasRamp = cameraInstruction.getTransformRamp(
+      for: CMTime(seconds: 0.45, preferredTimescale: 600),
+      start: &startTransform,
+      end: &endTransform,
+      timeRange: &timeRange
+    )
+
+    if hasRamp {
+      XCTAssertTrue(
+        transformsApproximatelyEqual(startTransform, endTransform),
+        "fixed camera behavior should not produce a time-varying camera transform"
+      )
+    }
+  }
+
   func testChromaKeySeparateCameraExportRemovesKeyColorInFinalCrop() throws {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -792,6 +1150,35 @@ final class LetterboxExporterTests: XCTestCase {
       attributes: nil
     )
     return url
+  }
+
+  private func makeZoomCursorRecording() -> CursorRecording {
+    let defaultPixels = Data([255, 255, 255, 255])
+    return CursorRecording(
+      sprites: [
+        CursorSprite(id: 0, width: 1, height: 1, hotspotX: 0, hotspotY: 0, pixels: defaultPixels),
+        CursorSprite(id: 1, width: 1, height: 1, hotspotX: 0, hotspotY: 0, pixels: defaultPixels),
+      ],
+      frames: [
+        CursorFrame(t: 0.0, x: 0.5, y: 0.5, spriteID: 0),
+        CursorFrame(t: 0.25, x: 0.8, y: 0.5, spriteID: 1),
+        CursorFrame(t: 0.55, x: 0.8, y: 0.5, spriteID: 1),
+        CursorFrame(t: 0.85, x: 0.5, y: 0.5, spriteID: 0),
+      ]
+    )
+  }
+
+  private func transformsApproximatelyEqual(
+    _ lhs: CGAffineTransform,
+    _ rhs: CGAffineTransform,
+    epsilon: CGFloat = 0.0001
+  ) -> Bool {
+    abs(lhs.a - rhs.a) <= epsilon
+      && abs(lhs.b - rhs.b) <= epsilon
+      && abs(lhs.c - rhs.c) <= epsilon
+      && abs(lhs.d - rhs.d) <= epsilon
+      && abs(lhs.tx - rhs.tx) <= epsilon
+      && abs(lhs.ty - rhs.ty) <= epsilon
   }
 
   private func makeSolidColorVideo(
@@ -1734,6 +2121,28 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     XCTAssertEqual(capabilities["border"], true)
     XCTAssertEqual(capabilities["shadow"], true)
     XCTAssertEqual(capabilities["chromaKey"], true)
+    let camera = try XCTUnwrap(payload["camera"] as? [String: Any])
+    XCTAssertEqual(camera["zoomBehavior"] as? String, CameraZoomBehavior.fixed.rawValue)
+    let zoomScaleMultiplier = try XCTUnwrap(camera["zoomScaleMultiplier"] as? Double)
+    XCTAssertEqual(zoomScaleMultiplier, 0.35, accuracy: 0.0001)
+  }
+
+  func testResolveCameraCompositionParamsAcceptsScaleWithZoomMultiplier() throws {
+    let facade = ScreenRecorderFacade()
+
+    let params = facade.resolveCameraCompositionParams(
+      source: "/tmp/recording.mov",
+      args: [
+        "cameraVisible": true,
+        "cameraLayoutPreset": "overlayTopRight",
+        "cameraZoomBehavior": "scaleWithScreenZoom",
+        "cameraZoomScaleMultiplier": 0.6,
+      ]
+    )
+
+    XCTAssertEqual(params?.zoomBehavior, .scaleWithScreenZoom)
+    let zoomScaleMultiplier = try XCTUnwrap(params?.zoomScaleMultiplier)
+    XCTAssertEqual(zoomScaleMultiplier, 0.6, accuracy: 0.0001)
   }
 
   func testSeparateCameraExportSanitizesOnlyUnsupportedChromaKeyStyling() {
@@ -1833,6 +2242,7 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       cameraMirror: true,
       cameraContentMode: .fill,
       cameraZoomBehavior: .fixed,
+      cameraZoomScaleMultiplier: 0.35,
       cameraChromaKeyEnabled: false,
       cameraChromaKeyStrength: 0.4,
       cameraChromaKeyColorArgb: nil

@@ -142,6 +142,9 @@ class PostProcessingSidebar extends StatelessWidget {
   final Function(double) onCameraCornerRadiusChangeEnd;
   final Function(bool) onCameraMirrorChanged;
   final Function(CameraContentMode) onCameraContentModeChanged;
+  final Function(CameraZoomBehavior) onCameraZoomBehaviorChanged;
+  final Function(double) onCameraZoomScaleMultiplierChanged;
+  final Function(double) onCameraZoomScaleMultiplierChangeEnd;
   final Function(double) onCameraManualCenterXChanged;
   final Function(double) onCameraManualCenterXChangeEnd;
   final Function(double) onCameraManualCenterYChanged;
@@ -197,6 +200,9 @@ class PostProcessingSidebar extends StatelessWidget {
     required this.onCameraCornerRadiusChangeEnd,
     required this.onCameraMirrorChanged,
     required this.onCameraContentModeChanged,
+    required this.onCameraZoomBehaviorChanged,
+    required this.onCameraZoomScaleMultiplierChanged,
+    required this.onCameraZoomScaleMultiplierChangeEnd,
     required this.onCameraManualCenterXChanged,
     required this.onCameraManualCenterXChangeEnd,
     required this.onCameraManualCenterYChanged,
@@ -295,6 +301,9 @@ class PostProcessingSidebar extends StatelessWidget {
         onCornerRadiusChangeEnd: onCameraCornerRadiusChangeEnd,
         onMirrorChanged: onCameraMirrorChanged,
         onContentModeChanged: onCameraContentModeChanged,
+        onZoomBehaviorChanged: onCameraZoomBehaviorChanged,
+        onZoomScaleMultiplierChanged: onCameraZoomScaleMultiplierChanged,
+        onZoomScaleMultiplierChangeEnd: onCameraZoomScaleMultiplierChangeEnd,
         onManualCenterXChanged: onCameraManualCenterXChanged,
         onManualCenterXChangeEnd: onCameraManualCenterXChangeEnd,
         onManualCenterYChanged: onCameraManualCenterYChanged,

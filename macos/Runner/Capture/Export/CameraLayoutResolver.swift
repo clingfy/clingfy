@@ -8,6 +8,8 @@ struct PreviewMediaSources: Equatable {
 }
 
 struct CameraCompositionParams: Equatable {
+  static let defaultZoomScaleMultiplier = 0.35
+
   var visible: Bool
   var layoutPreset: CameraLayoutPreset
   var normalizedCanvasCenter: CGPoint?
@@ -18,6 +20,7 @@ struct CameraCompositionParams: Equatable {
   var mirror: Bool
   var contentMode: CameraContentMode
   var zoomBehavior: CameraZoomBehavior
+  var zoomScaleMultiplier: Double = CameraCompositionParams.defaultZoomScaleMultiplier
   var borderWidth: Double
   var borderColorArgb: Int?
   var shadowPreset: Int
@@ -36,6 +39,7 @@ struct CameraCompositionParams: Equatable {
     mirror: true,
     contentMode: .fill,
     zoomBehavior: .fixed,
+    zoomScaleMultiplier: CameraCompositionParams.defaultZoomScaleMultiplier,
     borderWidth: 0.0,
     borderColorArgb: nil,
     shadowPreset: 0,

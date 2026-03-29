@@ -30,13 +30,17 @@ enum CameraLayoutPreset {
 
 enum CameraZoomBehavior {
   fixed,
-  scaleDownWhenScreenZooms;
+  scaleWithScreenZoom;
 
   static CameraZoomBehavior fromRaw(String? raw) {
-    return CameraZoomBehavior.values.firstWhere(
-      (value) => value.name == raw,
-      orElse: () => CameraZoomBehavior.fixed,
-    );
+    switch (raw) {
+      case 'scaleWithScreenZoom':
+        return CameraZoomBehavior.scaleWithScreenZoom;
+      case 'scaleDownWhenScreenZooms':
+        return CameraZoomBehavior.fixed;
+      default:
+        return CameraZoomBehavior.fixed;
+    }
   }
 }
 
@@ -67,6 +71,8 @@ enum CameraContentMode {
 }
 
 class CameraCompositionState {
+  static const double defaultZoomScaleMultiplier = 0.35;
+
   const CameraCompositionState({
     required this.visible,
     required this.layoutPreset,
@@ -78,6 +84,7 @@ class CameraCompositionState {
     required this.mirror,
     required this.contentMode,
     required this.zoomBehavior,
+    this.zoomScaleMultiplier = defaultZoomScaleMultiplier,
     required this.borderWidth,
     required this.borderColorArgb,
     required this.shadowPreset,
@@ -97,6 +104,7 @@ class CameraCompositionState {
       mirror = true,
       contentMode = CameraContentMode.fill,
       zoomBehavior = CameraZoomBehavior.fixed,
+      zoomScaleMultiplier = defaultZoomScaleMultiplier,
       borderWidth = 0.0,
       borderColorArgb = null,
       shadowPreset = 0,
@@ -114,6 +122,7 @@ class CameraCompositionState {
   final bool mirror;
   final CameraContentMode contentMode;
   final CameraZoomBehavior zoomBehavior;
+  final double zoomScaleMultiplier;
   final double borderWidth;
   final int? borderColorArgb;
   final int shadowPreset;
@@ -135,6 +144,7 @@ class CameraCompositionState {
     bool? mirror,
     CameraContentMode? contentMode,
     CameraZoomBehavior? zoomBehavior,
+    double? zoomScaleMultiplier,
     double? borderWidth,
     int? borderColorArgb,
     bool clearBorderColor = false,
@@ -157,6 +167,7 @@ class CameraCompositionState {
       mirror: mirror ?? this.mirror,
       contentMode: contentMode ?? this.contentMode,
       zoomBehavior: zoomBehavior ?? this.zoomBehavior,
+      zoomScaleMultiplier: zoomScaleMultiplier ?? this.zoomScaleMultiplier,
       borderWidth: borderWidth ?? this.borderWidth,
       borderColorArgb: clearBorderColor
           ? null
@@ -188,6 +199,9 @@ class CameraCompositionState {
       mirror: raw['mirror'] as bool? ?? true,
       contentMode: CameraContentMode.fromRaw(raw['contentMode']?.toString()),
       zoomBehavior: CameraZoomBehavior.fromRaw(raw['zoomBehavior']?.toString()),
+      zoomScaleMultiplier:
+          (raw['zoomScaleMultiplier'] as num?)?.toDouble() ??
+          defaultZoomScaleMultiplier,
       borderWidth: (raw['borderWidth'] as num?)?.toDouble() ?? 0.0,
       borderColorArgb: (raw['borderColorArgb'] as num?)?.toInt(),
       shadowPreset: (raw['shadowPreset'] as num?)?.toInt() ?? 0,
@@ -211,6 +225,7 @@ class CameraCompositionState {
       'cameraMirror': mirror,
       'cameraContentMode': contentMode.name,
       'cameraZoomBehavior': zoomBehavior.name,
+      'cameraZoomScaleMultiplier': zoomScaleMultiplier,
       'cameraBorderWidth': borderWidth,
       'cameraBorderColorArgb': borderColorArgb,
       'cameraShadowPreset': shadowPreset,

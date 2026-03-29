@@ -570,6 +570,13 @@ final class CompositionBuilder {
     let renderSize: CGSize
   }
 
+  private struct ExportZoomSample {
+    let time: Double
+    let zoom: CGFloat
+    let centerX: CGFloat
+    let centerY: CGFloat
+  }
+
   private func orientedSize(_ track: AVAssetTrack) -> CGSize {
     let rect = CGRect(origin: .zero, size: track.naturalSize).applying(track.preferredTransform)
     return .init(width: abs(rect.width), height: abs(rect.height))
@@ -764,17 +771,75 @@ final class CompositionBuilder {
           )
           let cameraFitMode: String =
             cameraAssetIsPreStyled ? "fit" : (cameraParams.contentMode == .fit ? "fit" : "fill")
-          cameraLayerInstruction.setTransform(
-            fittedTransform(
-              for: cameraTrack,
-              sourceSize: orientedSize(cameraTrack),
-              destinationRect: cameraResolution.frame,
-              fitMode: cameraFitMode,
-              mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
-            ),
-            at: .zero
+          let cameraSourceSize = orientedSize(cameraTrack)
+          let staticCameraTransform = fittedTransform(
+            for: cameraTrack,
+            sourceSize: cameraSourceSize,
+            destinationRect: cameraResolution.frame,
+            fitMode: cameraFitMode,
+            mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
           )
+          cameraLayerInstruction.setTransform(staticCameraTransform, at: .zero)
           cameraLayerInstruction.setOpacity(Float(max(0.0, min(1.0, cameraParams.opacity))), at: .zero)
+
+          if
+            cameraParams.zoomBehavior == .scaleWithScreenZoom,
+            cameraParams.layoutPreset != .backgroundBehind,
+            params.zoomEnabled,
+            let cursorRecording,
+            !cursorRecording.frames.isEmpty
+          {
+            let effectiveDuration = min(insertionDuration.seconds, screenAsset.duration.seconds)
+            let zoomSamples = buildExportZoomSamples(
+              recording: cursorRecording,
+              params: params,
+              target: target,
+              contentRect: screenContentRect,
+              contentWidth: contentWidth,
+              contentHeight: contentHeight,
+              videoDuration: effectiveDuration
+            ).filter { $0.time <= effectiveDuration + 0.0001 }
+
+            if zoomSamples.count >= 2 {
+              let cameraTransforms = zoomSamples.map { sample in
+                let resolvedCamera = CameraTransformTimelineBuilder.resolve(
+                  baseResolution: cameraResolution,
+                  cameraParams: cameraParams,
+                  screenZoom: sample.zoom
+                )
+                return fittedTransform(
+                  for: cameraTrack,
+                  sourceSize: cameraSourceSize,
+                  destinationRect: resolvedCamera.frame,
+                  fitMode: cameraFitMode,
+                  mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
+                )
+              }
+
+              if let firstTransform = cameraTransforms.first,
+                cameraTransforms.dropFirst().contains(where: {
+                  !transformsApproximatelyEqual($0, firstTransform)
+                })
+              {
+                cameraLayerInstruction.setTransform(firstTransform, at: .zero)
+
+                for idx in 0..<(zoomSamples.count - 1) {
+                  let startSeconds = zoomSamples[idx].time
+                  let endSeconds = min(zoomSamples[idx + 1].time, effectiveDuration)
+                  guard endSeconds > startSeconds else { continue }
+
+                  let startTime = CMTime(seconds: startSeconds, preferredTimescale: 600)
+                  let endTime = CMTime(seconds: endSeconds, preferredTimescale: 600)
+                  let timeRange = CMTimeRange(start: startTime, end: endTime)
+                  cameraLayerInstruction.setTransformRamp(
+                    fromStart: cameraTransforms[idx],
+                    toEnd: cameraTransforms[idx + 1],
+                    timeRange: timeRange
+                  )
+                }
+              }
+            }
+          }
 
           if cameraResolution.zOrder == .behindScreen {
             layerInstructions = [screenLayerInstruction, cameraLayerInstruction]
@@ -938,6 +1003,146 @@ final class CompositionBuilder {
   // MARK: - Export Logic Fix
   func inBounds(_ f: CursorFrame) -> Bool {
     f.spriteID >= 0 && (0.0...1.0).contains(f.x) && (0.0...1.0).contains(f.y)
+  }
+
+  private func buildExportZoomSamples(
+    recording: CursorRecording,
+    params: CompositionParams,
+    target: CGSize,
+    contentRect: CGRect,
+    contentWidth: Double,
+    contentHeight: Double,
+    videoDuration: Double
+  ) -> [ExportZoomSample] {
+    let frames = recording.frames
+    guard params.zoomEnabled, !frames.isEmpty, videoDuration > 0 else { return [] }
+
+    let mapX: (Double) -> CGFloat = { contentRect.minX + CGFloat($0) * contentWidth }
+    let mapYTopDown: (Double) -> CGFloat = { contentRect.minY + CGFloat($0) * contentHeight }
+    let focusX = contentRect.midX
+    let focusY = contentRect.midY
+
+    let fps = params.fpsHint > 0 ? Double(params.fpsHint) : 60.0
+    let step = 1.0 / fps
+    let totalExportFrames = Int(videoDuration * fps)
+
+    var samples: [ExportZoomSample] = []
+    samples.reserveCapacity(totalExportFrames + 1)
+
+    var smoothZ: CGFloat = 1.0
+    var smoothCx: CGFloat = focusX
+    var smoothCy: CGFloat = focusY
+    var didLogZoomSmootherProfile = false
+    var frameIndex = 0
+
+    let defaultSpriteID: Int =
+      frames.first(where: inBounds)?.spriteID
+      ?? frames.first(where: { $0.spriteID >= 0 })?.spriteID
+      ?? 0
+    let zoomHysteresis = ZoomHysteresis()
+
+    for i in 0...totalExportFrames {
+      let t = Double(i) * step
+
+      while frameIndex < frames.count - 1 && frames[frameIndex + 1].t <= t {
+        frameIndex += 1
+      }
+      let frame = frames[frameIndex]
+
+      let rawCx = mapX(frame.x)
+      let rawCyTop = mapYTopDown(frame.y)
+      let rawCy = target.height - rawCyTop
+
+      let isInside = inBounds(frame)
+      let rawZoomWanted = isInside && (frame.spriteID != defaultSpriteID)
+
+      let stableZoomActive: Bool
+      if isInside {
+        if let manualSegments = params.zoomSegments {
+          let tMs = Int(t * 1000)
+          stableZoomActive = manualSegments.contains { $0.contains(timeMs: tMs) }
+        } else {
+          stableZoomActive = zoomHysteresis.update(time: t, rawZoomWanted: rawZoomWanted)
+        }
+      } else {
+        zoomHysteresis.reset()
+        stableZoomActive = false
+      }
+
+      let targetZ: CGFloat = stableZoomActive ? params.zoomFactor : 1.0
+      let targetLookAtX = stableZoomActive ? rawCx : focusX
+      let targetLookAtY = stableZoomActive ? rawCy : focusY
+
+      let alpha = ZoomFollowSmoother.alpha(
+        baseStrength: params.followStrength,
+        dt: step
+      )
+
+      smoothZ = ZoomFollowSmoother.lerp(current: smoothZ, target: targetZ, alpha: alpha)
+      smoothCx = ZoomFollowSmoother.lerp(current: smoothCx, target: targetLookAtX, alpha: alpha)
+      smoothCy = ZoomFollowSmoother.lerp(current: smoothCy, target: targetLookAtY, alpha: alpha)
+
+      if !didLogZoomSmootherProfile {
+        didLogZoomSmootherProfile = true
+        NativeLogger.d(
+          "ZoomSmoother",
+          "Export smoother configured",
+          context: [
+            "followStrength": ZoomFollowSmoother.clampedFollowStrength(params.followStrength),
+            "alpha": alpha,
+            "fpsHint": params.fpsHint,
+            "dt": ZoomFollowSmoother.clampedDtSeconds(step),
+          ]
+        )
+      }
+
+      let safeZoom = max(smoothZ, 0.0001)
+      let halfWidth = contentRect.width / (2.0 * safeZoom)
+      let halfHeight = contentRect.height / (2.0 * safeZoom)
+      let minCenterX = contentRect.minX + halfWidth
+      let maxCenterX = contentRect.maxX - halfWidth
+      let minCenterY = contentRect.minY + halfHeight
+      let maxCenterY = contentRect.maxY - halfHeight
+      smoothCx = min(max(smoothCx, minCenterX), maxCenterX)
+      smoothCy = min(max(smoothCy, minCenterY), maxCenterY)
+
+      if ZoomFollowParityDebug.shouldLogExport(frameIndex: i) {
+        ZoomFollowParityDebug.logSample(
+          source: "export",
+          time: t,
+          zoom: smoothZ,
+          centerX: smoothCx,
+          centerY: smoothCy,
+          targetZoom: targetZ,
+          targetCenterX: targetLookAtX,
+          targetCenterY: targetLookAtY
+        )
+      }
+
+      samples.append(
+        ExportZoomSample(
+          time: t,
+          zoom: smoothZ,
+          centerX: smoothCx,
+          centerY: smoothCy
+        )
+      )
+    }
+
+    return samples
+  }
+
+  private func transformsApproximatelyEqual(
+    _ lhs: CGAffineTransform,
+    _ rhs: CGAffineTransform,
+    epsilon: CGFloat = 0.0001
+  ) -> Bool {
+    abs(lhs.a - rhs.a) <= epsilon
+      && abs(lhs.b - rhs.b) <= epsilon
+      && abs(lhs.c - rhs.c) <= epsilon
+      && abs(lhs.d - rhs.d) <= epsilon
+      && abs(lhs.tx - rhs.tx) <= epsilon
+      && abs(lhs.ty - rhs.ty) <= epsilon
   }
 
   private func addCursorLayer(
@@ -1156,120 +1361,23 @@ final class CompositionBuilder {
 
       let focusX = contentRect.midX
       let focusY = contentRect.midY
+      let zoomSamples = buildExportZoomSamples(
+        recording: recording,
+        params: params,
+        target: target,
+        contentRect: contentRect,
+        contentWidth: contentWidth,
+        contentHeight: contentHeight,
+        videoDuration: videoDuration
+      )
 
-      // Sampling setup
-      let fps = params.fpsHint > 0 ? Double(params.fpsHint) : 60.0
-      let step = 1.0 / fps
-      let totalExportFrames = Int(videoDuration * fps)
-
-      var times: [NSNumber] = []
-      var values: [NSValue] = []
-
-      var smoothZ: CGFloat = 1.0
-      var smoothCx: CGFloat = focusX
-      var smoothCy: CGFloat = focusY
-      var didLogZoomSmootherProfile = false
-
-      // Optimization: frame scanner index
-      var frameIndex = 0
-
-      // Need defaultSpriteID for zoom logic
-      let defaultSpriteID: Int =
-        frames.first(where: inBounds)?.spriteID
-        ?? frames.first(where: { $0.spriteID >= 0 })?.spriteID
-        ?? 0
-      let zoomHysteresis = ZoomHysteresis()
-
-      // [FIX 4] Resampling Loop (Frame-by-Frame Simulation)
-      for i in 0...totalExportFrames {
-        let t = Double(i) * step
-
-        // Find active frame
-        while frameIndex < frames.count - 1 && frames[frameIndex + 1].t <= t {
-          frameIndex += 1
-        }
-        let f = frames[frameIndex]
-
-        let rawCx = mapX(f.x)
-        let rawCyTop = mapYTopDown(f.y)
-        let rawCy = target.height - rawCyTop
-
-        let isInside = inBounds(f)
-        let rawZoomWanted = isInside && (f.spriteID != defaultSpriteID)
-
-        var stableZoomActive: Bool = false
-        if isInside {
-          if let manualSegments = params.zoomSegments {
-            let tMs = Int(t * 1000)
-            stableZoomActive = manualSegments.contains { $0.contains(timeMs: tMs) }
-          } else {
-            stableZoomActive = zoomHysteresis.update(time: t, rawZoomWanted: rawZoomWanted)
-          }
-        } else {
-          zoomHysteresis.reset()
-          stableZoomActive = false
-        }
-
-        let targetZ: CGFloat = stableZoomActive ? params.zoomFactor : 1.0
-
-        // If zoom is NOT active, look at center. If active, look at cursor.
-        let targetLookAtX = stableZoomActive ? rawCx : focusX
-        let targetLookAtY = stableZoomActive ? rawCy : focusY
-
-        let alpha = ZoomFollowSmoother.alpha(
-          baseStrength: params.followStrength,
-          dt: step
-        )
-
-        smoothZ = ZoomFollowSmoother.lerp(current: smoothZ, target: targetZ, alpha: alpha)
-        smoothCx = ZoomFollowSmoother.lerp(current: smoothCx, target: targetLookAtX, alpha: alpha)
-        smoothCy = ZoomFollowSmoother.lerp(current: smoothCy, target: targetLookAtY, alpha: alpha)
-
-        if !didLogZoomSmootherProfile {
-          didLogZoomSmootherProfile = true
-          NativeLogger.d(
-            "ZoomSmoother",
-            "Export smoother configured",
-            context: [
-              "followStrength": ZoomFollowSmoother.clampedFollowStrength(params.followStrength),
-              "alpha": alpha,
-              "fpsHint": params.fpsHint,
-              "dt": ZoomFollowSmoother.clampedDtSeconds(step),
-            ]
-          )
-        }
-
-        let safeZoom = max(smoothZ, 0.0001)
-        let halfWidth = contentRect.width / (2.0 * safeZoom)
-        let halfHeight = contentRect.height / (2.0 * safeZoom)
-        let minCenterX = contentRect.minX + halfWidth
-        let maxCenterX = contentRect.maxX - halfWidth
-        let minCenterY = contentRect.minY + halfHeight
-        let maxCenterY = contentRect.maxY - halfHeight
-        smoothCx = min(max(smoothCx, minCenterX), maxCenterX)
-        smoothCy = min(max(smoothCy, minCenterY), maxCenterY)
-
-        // [FIX 5] Target-to-Center Matrix
-        var m = CATransform3DIdentity
-        m = CATransform3DTranslate(m, focusX, focusY, 0)
-        m = CATransform3DScale(m, smoothZ, smoothZ, 1)
-        m = CATransform3DTranslate(m, -smoothCx, -smoothCy, 0)
-
-        if ZoomFollowParityDebug.shouldLogExport(frameIndex: i) {
-          ZoomFollowParityDebug.logSample(
-            source: "export",
-            time: t,
-            zoom: smoothZ,
-            centerX: smoothCx,
-            centerY: smoothCy,
-            targetZoom: targetZ,
-            targetCenterX: targetLookAtX,
-            targetCenterY: targetLookAtY
-          )
-        }
-
-        times.append(NSNumber(value: t / max(videoDuration, 0.0001)))
-        values.append(NSValue(caTransform3D: m))
+      let times = zoomSamples.map { NSNumber(value: $0.time / max(videoDuration, 0.0001)) }
+      let values = zoomSamples.map { sample -> NSValue in
+        var transform = CATransform3DIdentity
+        transform = CATransform3DTranslate(transform, focusX, focusY, 0)
+        transform = CATransform3DScale(transform, sample.zoom, sample.zoom, 1)
+        transform = CATransform3DTranslate(transform, -sample.centerX, -sample.centerY, 0)
+        return NSValue(caTransform3D: transform)
       }
 
       let zoomAnim = CAKeyframeAnimation(keyPath: "transform")

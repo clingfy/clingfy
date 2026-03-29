@@ -88,6 +88,8 @@ void main() {
       sessionId: 'rec_test_session',
       sourcePath: '/tmp/original.mov',
     );
+    await Future<void>.delayed(Duration.zero);
+    processCalls.clear();
 
     final harness = _Harness(
       player: player,
@@ -151,6 +153,27 @@ void main() {
         args['resolutionPreset'],
         harness.settings.post.resolutionPreset.name,
       );
+    },
+  );
+
+  test(
+    'camera zoom behavior and multiplier are included in preview payloads',
+    () async {
+      final harness = await createHarness();
+
+      harness.post.setCameraVisible(true);
+      harness.post.setCameraZoomBehavior(
+        CameraZoomBehavior.scaleWithScreenZoom,
+      );
+      harness.post.setCameraZoomScaleMultiplierEnd(0.6);
+
+      expect(harness.processCalls, isNotEmpty);
+      final args = Map<String, dynamic>.from(
+        harness.processCalls.last.arguments! as Map<dynamic, dynamic>,
+      );
+
+      expect(args['cameraZoomBehavior'], 'scaleWithScreenZoom');
+      expect(args['cameraZoomScaleMultiplier'], 0.6);
     },
   );
 }

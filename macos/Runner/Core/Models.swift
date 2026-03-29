@@ -67,7 +67,29 @@ enum CameraLayoutPreset: String, Codable, CaseIterable {
 
 enum CameraZoomBehavior: String, Codable {
   case fixed = "fixed"
-  case scaleDownWhenScreenZooms = "scaleDownWhenScreenZooms"
+  case scaleWithScreenZoom = "scaleWithScreenZoom"
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let rawValue = try container.decode(String.self)
+    self = CameraZoomBehavior.from(rawValue: rawValue)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  static func from(rawValue: String?) -> CameraZoomBehavior {
+    switch rawValue {
+    case CameraZoomBehavior.scaleWithScreenZoom.rawValue:
+      return .scaleWithScreenZoom
+    case "scaleDownWhenScreenZooms":
+      return .fixed
+    default:
+      return .fixed
+    }
+  }
 }
 
 enum CameraShape: String, Codable {

@@ -1717,6 +1717,7 @@ final class ScreenRecorderFacade: NSObject {
       mirror: editorSeed.cameraMirror,
       contentMode: editorSeed.cameraContentMode,
       zoomBehavior: editorSeed.cameraZoomBehavior,
+      zoomScaleMultiplier: editorSeed.cameraZoomScaleMultiplier,
       borderWidth: editorSeed.cameraBorderWidth,
       borderColorArgb: editorSeed.cameraBorderColorArgb,
       shadowPreset: editorSeed.cameraShadow,
@@ -1737,6 +1738,7 @@ final class ScreenRecorderFacade: NSObject {
       "mirror": params.mirror,
       "contentMode": params.contentMode.rawValue,
       "zoomBehavior": params.zoomBehavior.rawValue,
+      "zoomScaleMultiplier": params.zoomScaleMultiplier,
       "borderWidth": params.borderWidth,
       "shadowPreset": params.shadowPreset,
       "chromaKeyEnabled": params.chromaKeyEnabled,
@@ -1809,10 +1811,11 @@ final class ScreenRecorderFacade: NSObject {
     {
       params.contentMode = contentMode
     }
-    if let rawZoomBehavior = args["cameraZoomBehavior"] as? String,
-      let zoomBehavior = CameraZoomBehavior(rawValue: rawZoomBehavior)
-    {
-      params.zoomBehavior = zoomBehavior
+    if let rawZoomBehavior = args["cameraZoomBehavior"] as? String {
+      params.zoomBehavior = CameraZoomBehavior.from(rawValue: rawZoomBehavior)
+    }
+    if let zoomScaleMultiplier = doubleValue(args["cameraZoomScaleMultiplier"]) {
+      params.zoomScaleMultiplier = min(max(zoomScaleMultiplier, 0.0), 1.0)
     }
     if let sizeFactor = doubleValue(args["cameraSizeFactor"]) {
       params.sizeFactor = sizeFactor
@@ -2546,6 +2549,7 @@ final class ScreenRecorderFacade: NSObject {
       cameraMirror: prefs.overlayMirror,
       cameraContentMode: .fill,
       cameraZoomBehavior: .fixed,
+      cameraZoomScaleMultiplier: CameraCompositionParams.defaultZoomScaleMultiplier,
       cameraChromaKeyEnabled: camera.chromaKeyEnabled,
       cameraChromaKeyStrength: camera.chromaKeyStrength,
       cameraChromaKeyColorArgb: camera.chromaKeyColor.argbIntValue

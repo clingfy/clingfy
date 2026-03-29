@@ -257,6 +257,24 @@ class PostProcessingController extends ChangeNotifier {
     applyProcessing();
   }
 
+  void setCameraZoomBehavior(CameraZoomBehavior behavior) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(zoomBehavior: behavior);
+    notifyListeners();
+    applyProcessing();
+  }
+
+  void setCameraZoomScaleMultiplier(double value) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(zoomScaleMultiplier: value.clamp(0.0, 1.0));
+    notifyListeners();
+  }
+
+  void setCameraZoomScaleMultiplierEnd(double value) {
+    setCameraZoomScaleMultiplier(value);
+    applyProcessing();
+  }
+
   void resetCameraManualPosition() {
     final current = _cameraState ?? const CameraCompositionState.hidden();
     _cameraState = current.copyWith(clearNormalizedCanvasCenter: true);
