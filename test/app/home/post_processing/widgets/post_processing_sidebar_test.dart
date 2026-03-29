@@ -101,6 +101,15 @@ void main() {
                 onCameraZoomScaleMultiplierChanged ?? (_) {},
             onCameraZoomScaleMultiplierChangeEnd:
                 onCameraZoomScaleMultiplierChangeEnd ?? (_) {},
+            onCameraIntroPresetChanged: (_) {},
+            onCameraOutroPresetChanged: (_) {},
+            onCameraZoomEmphasisPresetChanged: (_) {},
+            onCameraIntroDurationChanged: (_) {},
+            onCameraIntroDurationChangeEnd: (_) {},
+            onCameraOutroDurationChanged: (_) {},
+            onCameraOutroDurationChangeEnd: (_) {},
+            onCameraZoomEmphasisStrengthChanged: (_) {},
+            onCameraZoomEmphasisStrengthChangeEnd: (_) {},
             onCameraManualCenterXChanged: (_) {},
             onCameraManualCenterXChangeEnd: (_) {},
             onCameraManualCenterYChanged: (_) {},
@@ -401,6 +410,38 @@ void main() {
       expect(find.text('Zoom Response'), findsOneWidget);
       expect(find.text('Zoom Scale'), findsOneWidget);
       expect(find.text('35%'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'camera section shows animation controls only when their presets are enabled',
+    (tester) async {
+      await tester.pumpWidget(
+        buildTestApp(
+          hasCameraAsset: true,
+          cameraState: const CameraCompositionState.hidden().copyWith(
+            visible: true,
+            layoutPreset: CameraLayoutPreset.overlayBottomRight,
+            introPreset: CameraIntroPreset.pop,
+            outroPreset: CameraOutroPreset.fade,
+            zoomEmphasisPreset: CameraZoomEmphasisPreset.pulse,
+            introDurationMs: 300,
+            outroDurationMs: 260,
+            zoomEmphasisStrength: 0.12,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Intro'), findsOneWidget);
+      expect(find.text('Outro'), findsOneWidget);
+      expect(find.text('Zoom Emphasis'), findsOneWidget);
+      expect(find.text('Intro Duration'), findsOneWidget);
+      expect(find.text('Outro Duration'), findsOneWidget);
+      expect(find.text('Pulse Strength'), findsOneWidget);
+      expect(find.text('300 ms'), findsOneWidget);
+      expect(find.text('260 ms'), findsOneWidget);
+      expect(find.text('12%'), findsOneWidget);
     },
   );
 

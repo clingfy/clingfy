@@ -44,6 +44,46 @@ enum CameraZoomBehavior {
   }
 }
 
+enum CameraIntroPreset {
+  none,
+  fade,
+  pop,
+  slide;
+
+  static CameraIntroPreset fromRaw(String? raw) {
+    return CameraIntroPreset.values.firstWhere(
+      (value) => value.name == raw,
+      orElse: () => CameraIntroPreset.none,
+    );
+  }
+}
+
+enum CameraOutroPreset {
+  none,
+  fade,
+  shrink,
+  slide;
+
+  static CameraOutroPreset fromRaw(String? raw) {
+    return CameraOutroPreset.values.firstWhere(
+      (value) => value.name == raw,
+      orElse: () => CameraOutroPreset.none,
+    );
+  }
+}
+
+enum CameraZoomEmphasisPreset {
+  none,
+  pulse;
+
+  static CameraZoomEmphasisPreset fromRaw(String? raw) {
+    return CameraZoomEmphasisPreset.values.firstWhere(
+      (value) => value.name == raw,
+      orElse: () => CameraZoomEmphasisPreset.none,
+    );
+  }
+}
+
 enum CameraShape {
   circle,
   roundedRect,
@@ -72,6 +112,9 @@ enum CameraContentMode {
 
 class CameraCompositionState {
   static const double defaultZoomScaleMultiplier = 0.35;
+  static const int defaultIntroDurationMs = 220;
+  static const int defaultOutroDurationMs = 180;
+  static const double defaultZoomEmphasisStrength = 0.10;
 
   const CameraCompositionState({
     required this.visible,
@@ -85,6 +128,12 @@ class CameraCompositionState {
     required this.contentMode,
     required this.zoomBehavior,
     this.zoomScaleMultiplier = defaultZoomScaleMultiplier,
+    this.introPreset = CameraIntroPreset.none,
+    this.outroPreset = CameraOutroPreset.none,
+    this.zoomEmphasisPreset = CameraZoomEmphasisPreset.none,
+    this.introDurationMs = defaultIntroDurationMs,
+    this.outroDurationMs = defaultOutroDurationMs,
+    this.zoomEmphasisStrength = defaultZoomEmphasisStrength,
     required this.borderWidth,
     required this.borderColorArgb,
     required this.shadowPreset,
@@ -105,6 +154,12 @@ class CameraCompositionState {
       contentMode = CameraContentMode.fill,
       zoomBehavior = CameraZoomBehavior.fixed,
       zoomScaleMultiplier = defaultZoomScaleMultiplier,
+      introPreset = CameraIntroPreset.none,
+      outroPreset = CameraOutroPreset.none,
+      zoomEmphasisPreset = CameraZoomEmphasisPreset.none,
+      introDurationMs = defaultIntroDurationMs,
+      outroDurationMs = defaultOutroDurationMs,
+      zoomEmphasisStrength = defaultZoomEmphasisStrength,
       borderWidth = 0.0,
       borderColorArgb = null,
       shadowPreset = 0,
@@ -123,6 +178,12 @@ class CameraCompositionState {
   final CameraContentMode contentMode;
   final CameraZoomBehavior zoomBehavior;
   final double zoomScaleMultiplier;
+  final CameraIntroPreset introPreset;
+  final CameraOutroPreset outroPreset;
+  final CameraZoomEmphasisPreset zoomEmphasisPreset;
+  final int introDurationMs;
+  final int outroDurationMs;
+  final double zoomEmphasisStrength;
   final double borderWidth;
   final int? borderColorArgb;
   final int shadowPreset;
@@ -145,6 +206,12 @@ class CameraCompositionState {
     CameraContentMode? contentMode,
     CameraZoomBehavior? zoomBehavior,
     double? zoomScaleMultiplier,
+    CameraIntroPreset? introPreset,
+    CameraOutroPreset? outroPreset,
+    CameraZoomEmphasisPreset? zoomEmphasisPreset,
+    int? introDurationMs,
+    int? outroDurationMs,
+    double? zoomEmphasisStrength,
     double? borderWidth,
     int? borderColorArgb,
     bool clearBorderColor = false,
@@ -168,6 +235,12 @@ class CameraCompositionState {
       contentMode: contentMode ?? this.contentMode,
       zoomBehavior: zoomBehavior ?? this.zoomBehavior,
       zoomScaleMultiplier: zoomScaleMultiplier ?? this.zoomScaleMultiplier,
+      introPreset: introPreset ?? this.introPreset,
+      outroPreset: outroPreset ?? this.outroPreset,
+      zoomEmphasisPreset: zoomEmphasisPreset ?? this.zoomEmphasisPreset,
+      introDurationMs: introDurationMs ?? this.introDurationMs,
+      outroDurationMs: outroDurationMs ?? this.outroDurationMs,
+      zoomEmphasisStrength: zoomEmphasisStrength ?? this.zoomEmphasisStrength,
       borderWidth: borderWidth ?? this.borderWidth,
       borderColorArgb: clearBorderColor
           ? null
@@ -202,6 +275,18 @@ class CameraCompositionState {
       zoomScaleMultiplier:
           (raw['zoomScaleMultiplier'] as num?)?.toDouble() ??
           defaultZoomScaleMultiplier,
+      introPreset: CameraIntroPreset.fromRaw(raw['introPreset']?.toString()),
+      outroPreset: CameraOutroPreset.fromRaw(raw['outroPreset']?.toString()),
+      zoomEmphasisPreset: CameraZoomEmphasisPreset.fromRaw(
+        raw['zoomEmphasisPreset']?.toString(),
+      ),
+      introDurationMs:
+          (raw['introDurationMs'] as num?)?.toInt() ?? defaultIntroDurationMs,
+      outroDurationMs:
+          (raw['outroDurationMs'] as num?)?.toInt() ?? defaultOutroDurationMs,
+      zoomEmphasisStrength:
+          (raw['zoomEmphasisStrength'] as num?)?.toDouble() ??
+          defaultZoomEmphasisStrength,
       borderWidth: (raw['borderWidth'] as num?)?.toDouble() ?? 0.0,
       borderColorArgb: (raw['borderColorArgb'] as num?)?.toInt(),
       shadowPreset: (raw['shadowPreset'] as num?)?.toInt() ?? 0,
@@ -226,6 +311,12 @@ class CameraCompositionState {
       'cameraContentMode': contentMode.name,
       'cameraZoomBehavior': zoomBehavior.name,
       'cameraZoomScaleMultiplier': zoomScaleMultiplier,
+      'cameraIntroPreset': introPreset.name,
+      'cameraOutroPreset': outroPreset.name,
+      'cameraZoomEmphasisPreset': zoomEmphasisPreset.name,
+      'cameraIntroDurationMs': introDurationMs,
+      'cameraOutroDurationMs': outroDurationMs,
+      'cameraZoomEmphasisStrength': zoomEmphasisStrength,
       'cameraBorderWidth': borderWidth,
       'cameraBorderColorArgb': borderColorArgb,
       'cameraShadowPreset': shadowPreset,

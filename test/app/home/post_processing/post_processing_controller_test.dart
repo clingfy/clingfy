@@ -176,4 +176,28 @@ void main() {
       expect(args['cameraZoomScaleMultiplier'], 0.6);
     },
   );
+
+  test('camera animation settings are included in preview payloads', () async {
+    final harness = await createHarness();
+
+    harness.post.setCameraVisible(true);
+    harness.post.setCameraIntroPreset(CameraIntroPreset.pop);
+    harness.post.setCameraOutroPreset(CameraOutroPreset.slide);
+    harness.post.setCameraZoomEmphasisPreset(CameraZoomEmphasisPreset.pulse);
+    harness.post.setCameraIntroDurationMsEnd(300);
+    harness.post.setCameraOutroDurationMsEnd(260);
+    harness.post.setCameraZoomEmphasisStrengthEnd(0.12);
+
+    expect(harness.processCalls, isNotEmpty);
+    final args = Map<String, dynamic>.from(
+      harness.processCalls.last.arguments! as Map<dynamic, dynamic>,
+    );
+
+    expect(args['cameraIntroPreset'], 'pop');
+    expect(args['cameraOutroPreset'], 'slide');
+    expect(args['cameraZoomEmphasisPreset'], 'pulse');
+    expect(args['cameraIntroDurationMs'], 300);
+    expect(args['cameraOutroDurationMs'], 260);
+    expect(args['cameraZoomEmphasisStrength'], 0.12);
+  });
 }

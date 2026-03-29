@@ -139,6 +139,17 @@ class PostProcessingSidebarContainer extends StatelessWidget {
           onCameraZoomScaleMultiplierChanged: post.setCameraZoomScaleMultiplier,
           onCameraZoomScaleMultiplierChangeEnd:
               post.setCameraZoomScaleMultiplierEnd,
+          onCameraIntroPresetChanged: post.setCameraIntroPreset,
+          onCameraOutroPresetChanged: post.setCameraOutroPreset,
+          onCameraZoomEmphasisPresetChanged: post.setCameraZoomEmphasisPreset,
+          onCameraIntroDurationChanged: post.setCameraIntroDurationMs,
+          onCameraIntroDurationChangeEnd: post.setCameraIntroDurationMsEnd,
+          onCameraOutroDurationChanged: post.setCameraOutroDurationMs,
+          onCameraOutroDurationChangeEnd: post.setCameraOutroDurationMsEnd,
+          onCameraZoomEmphasisStrengthChanged:
+              post.setCameraZoomEmphasisStrength,
+          onCameraZoomEmphasisStrengthChangeEnd:
+              post.setCameraZoomEmphasisStrengthEnd,
           onCameraManualCenterXChanged: post.setCameraManualCenterX,
           onCameraManualCenterXChangeEnd: post.setCameraManualCenterXEnd,
           onCameraManualCenterYChanged: post.setCameraManualCenterY,

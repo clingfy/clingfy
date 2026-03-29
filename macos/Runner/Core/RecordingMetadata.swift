@@ -70,6 +70,12 @@ struct RecordingMetadata: Codable {
     var cameraContentMode: CameraContentMode
     var cameraZoomBehavior: CameraZoomBehavior
     var cameraZoomScaleMultiplier: Double
+    var cameraIntroPreset: CameraIntroPreset
+    var cameraOutroPreset: CameraOutroPreset
+    var cameraZoomEmphasisPreset: CameraZoomEmphasisPreset
+    var cameraIntroDurationMs: Int
+    var cameraOutroDurationMs: Int
+    var cameraZoomEmphasisStrength: Double
     var cameraChromaKeyEnabled: Bool
     var cameraChromaKeyStrength: Double
     var cameraChromaKeyColorArgb: Int?
@@ -89,6 +95,12 @@ struct RecordingMetadata: Codable {
       cameraContentMode: CameraContentMode,
       cameraZoomBehavior: CameraZoomBehavior,
       cameraZoomScaleMultiplier: Double = 0.35,
+      cameraIntroPreset: CameraIntroPreset = .none,
+      cameraOutroPreset: CameraOutroPreset = .none,
+      cameraZoomEmphasisPreset: CameraZoomEmphasisPreset = .none,
+      cameraIntroDurationMs: Int = CameraCompositionParams.defaultIntroDurationMs,
+      cameraOutroDurationMs: Int = CameraCompositionParams.defaultOutroDurationMs,
+      cameraZoomEmphasisStrength: Double = CameraCompositionParams.defaultZoomEmphasisStrength,
       cameraChromaKeyEnabled: Bool,
       cameraChromaKeyStrength: Double,
       cameraChromaKeyColorArgb: Int?
@@ -107,6 +119,12 @@ struct RecordingMetadata: Codable {
       self.cameraContentMode = cameraContentMode
       self.cameraZoomBehavior = cameraZoomBehavior
       self.cameraZoomScaleMultiplier = cameraZoomScaleMultiplier
+      self.cameraIntroPreset = cameraIntroPreset
+      self.cameraOutroPreset = cameraOutroPreset
+      self.cameraZoomEmphasisPreset = cameraZoomEmphasisPreset
+      self.cameraIntroDurationMs = cameraIntroDurationMs
+      self.cameraOutroDurationMs = cameraOutroDurationMs
+      self.cameraZoomEmphasisStrength = cameraZoomEmphasisStrength
       self.cameraChromaKeyEnabled = cameraChromaKeyEnabled
       self.cameraChromaKeyStrength = cameraChromaKeyStrength
       self.cameraChromaKeyColorArgb = cameraChromaKeyColorArgb
@@ -127,6 +145,12 @@ struct RecordingMetadata: Codable {
       case cameraContentMode
       case cameraZoomBehavior
       case cameraZoomScaleMultiplier
+      case cameraIntroPreset
+      case cameraOutroPreset
+      case cameraZoomEmphasisPreset
+      case cameraIntroDurationMs
+      case cameraOutroDurationMs
+      case cameraZoomEmphasisStrength
       case cameraChromaKeyEnabled
       case cameraChromaKeyStrength
       case cameraChromaKeyColorArgb
@@ -156,6 +180,27 @@ struct RecordingMetadata: Codable {
         Double.self,
         forKey: .cameraZoomScaleMultiplier
       ) ?? 0.35
+      cameraIntroPreset = CameraIntroPreset.from(
+        rawValue: try container.decodeIfPresent(String.self, forKey: .cameraIntroPreset)
+      )
+      cameraOutroPreset = CameraOutroPreset.from(
+        rawValue: try container.decodeIfPresent(String.self, forKey: .cameraOutroPreset)
+      )
+      cameraZoomEmphasisPreset = CameraZoomEmphasisPreset.from(
+        rawValue: try container.decodeIfPresent(String.self, forKey: .cameraZoomEmphasisPreset)
+      )
+      cameraIntroDurationMs = try container.decodeIfPresent(
+        Int.self,
+        forKey: .cameraIntroDurationMs
+      ) ?? CameraCompositionParams.defaultIntroDurationMs
+      cameraOutroDurationMs = try container.decodeIfPresent(
+        Int.self,
+        forKey: .cameraOutroDurationMs
+      ) ?? CameraCompositionParams.defaultOutroDurationMs
+      cameraZoomEmphasisStrength = try container.decodeIfPresent(
+        Double.self,
+        forKey: .cameraZoomEmphasisStrength
+      ) ?? CameraCompositionParams.defaultZoomEmphasisStrength
       cameraChromaKeyEnabled = try container.decode(Bool.self, forKey: .cameraChromaKeyEnabled)
       cameraChromaKeyStrength = try container.decode(Double.self, forKey: .cameraChromaKeyStrength)
       cameraChromaKeyColorArgb = try container.decodeIfPresent(
@@ -284,6 +329,12 @@ private extension RecordingMetadata {
         cameraContentMode: .fill,
         cameraZoomBehavior: .fixed,
         cameraZoomScaleMultiplier: 0.35,
+        cameraIntroPreset: .none,
+        cameraOutroPreset: .none,
+        cameraZoomEmphasisPreset: .none,
+        cameraIntroDurationMs: CameraCompositionParams.defaultIntroDurationMs,
+        cameraOutroDurationMs: CameraCompositionParams.defaultOutroDurationMs,
+        cameraZoomEmphasisStrength: CameraCompositionParams.defaultZoomEmphasisStrength,
         cameraChromaKeyEnabled: false,
         cameraChromaKeyStrength: 0.4,
         cameraChromaKeyColorArgb: nil

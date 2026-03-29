@@ -9,6 +9,9 @@ struct PreviewMediaSources: Equatable {
 
 struct CameraCompositionParams: Equatable {
   static let defaultZoomScaleMultiplier = 0.35
+  static let defaultIntroDurationMs = 220
+  static let defaultOutroDurationMs = 180
+  static let defaultZoomEmphasisStrength = 0.10
 
   var visible: Bool
   var layoutPreset: CameraLayoutPreset
@@ -21,6 +24,12 @@ struct CameraCompositionParams: Equatable {
   var contentMode: CameraContentMode
   var zoomBehavior: CameraZoomBehavior
   var zoomScaleMultiplier: Double = CameraCompositionParams.defaultZoomScaleMultiplier
+  var introPreset: CameraIntroPreset = .none
+  var outroPreset: CameraOutroPreset = .none
+  var zoomEmphasisPreset: CameraZoomEmphasisPreset = .none
+  var introDurationMs: Int = CameraCompositionParams.defaultIntroDurationMs
+  var outroDurationMs: Int = CameraCompositionParams.defaultOutroDurationMs
+  var zoomEmphasisStrength: Double = CameraCompositionParams.defaultZoomEmphasisStrength
   var borderWidth: Double
   var borderColorArgb: Int?
   var shadowPreset: Int
@@ -40,6 +49,12 @@ struct CameraCompositionParams: Equatable {
     contentMode: .fill,
     zoomBehavior: .fixed,
     zoomScaleMultiplier: CameraCompositionParams.defaultZoomScaleMultiplier,
+    introPreset: .none,
+    outroPreset: .none,
+    zoomEmphasisPreset: .none,
+    introDurationMs: CameraCompositionParams.defaultIntroDurationMs,
+    outroDurationMs: CameraCompositionParams.defaultOutroDurationMs,
+    zoomEmphasisStrength: CameraCompositionParams.defaultZoomEmphasisStrength,
     borderWidth: 0.0,
     borderColorArgb: nil,
     shadowPreset: 0,

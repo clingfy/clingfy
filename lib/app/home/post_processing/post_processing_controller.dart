@@ -275,6 +275,66 @@ class PostProcessingController extends ChangeNotifier {
     applyProcessing();
   }
 
+  void setCameraIntroPreset(CameraIntroPreset preset) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(introPreset: preset);
+    notifyListeners();
+    applyProcessing();
+  }
+
+  void setCameraOutroPreset(CameraOutroPreset preset) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(outroPreset: preset);
+    notifyListeners();
+    applyProcessing();
+  }
+
+  void setCameraZoomEmphasisPreset(CameraZoomEmphasisPreset preset) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(zoomEmphasisPreset: preset);
+    notifyListeners();
+    applyProcessing();
+  }
+
+  void setCameraIntroDurationMs(double value) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(
+      introDurationMs: value.round().clamp(80, 600) as int,
+    );
+    notifyListeners();
+  }
+
+  void setCameraIntroDurationMsEnd(double value) {
+    setCameraIntroDurationMs(value);
+    applyProcessing();
+  }
+
+  void setCameraOutroDurationMs(double value) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(
+      outroDurationMs: value.round().clamp(80, 600) as int,
+    );
+    notifyListeners();
+  }
+
+  void setCameraOutroDurationMsEnd(double value) {
+    setCameraOutroDurationMs(value);
+    applyProcessing();
+  }
+
+  void setCameraZoomEmphasisStrength(double value) {
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(
+      zoomEmphasisStrength: value.clamp(0.0, 0.20),
+    );
+    notifyListeners();
+  }
+
+  void setCameraZoomEmphasisStrengthEnd(double value) {
+    setCameraZoomEmphasisStrength(value);
+    applyProcessing();
+  }
+
   void resetCameraManualPosition() {
     final current = _cameraState ?? const CameraCompositionState.hidden();
     _cameraState = current.copyWith(clearNormalizedCanvasCenter: true);

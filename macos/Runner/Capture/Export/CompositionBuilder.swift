@@ -575,6 +575,14 @@ final class CompositionBuilder {
     let zoom: CGFloat
     let centerX: CGFloat
     let centerY: CGFloat
+    let isActive: Bool
+    let localTime: Double?
+  }
+
+  private struct CameraPresentationSample {
+    let time: Double
+    let zoom: CGFloat
+    let zoomState: CameraAnimationZoomState
   }
 
   private func orientedSize(_ track: AVAssetTrack) -> CGSize {
@@ -772,72 +780,113 @@ final class CompositionBuilder {
           let cameraFitMode: String =
             cameraAssetIsPreStyled ? "fit" : (cameraParams.contentMode == .fit ? "fit" : "fill")
           let cameraSourceSize = orientedSize(cameraTrack)
-          let staticCameraTransform = fittedTransform(
-            for: cameraTrack,
-            sourceSize: cameraSourceSize,
-            destinationRect: cameraResolution.frame,
-            fitMode: cameraFitMode,
-            mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
+          let effectiveDuration = min(insertionDuration.seconds, screenAsset.duration.seconds)
+          let presentationSamples = buildCameraPresentationSamples(
+            params: params,
+            cameraParams: cameraParams,
+            cursorRecording: cursorRecording,
+            target: target,
+            contentRect: screenContentRect,
+            contentWidth: contentWidth,
+            contentHeight: contentHeight,
+            effectiveDuration: effectiveDuration
           )
-          cameraLayerInstruction.setTransform(staticCameraTransform, at: .zero)
-          cameraLayerInstruction.setOpacity(Float(max(0.0, min(1.0, cameraParams.opacity))), at: .zero)
+          let cameraPresentation = presentationSamples.isEmpty
+            ? [
+              CameraPresentationSample(
+                time: 0.0,
+                zoom: 1.0,
+                zoomState: .inactive
+              )
+            ]
+            : presentationSamples
+          let cameraTransforms = cameraPresentation.map { sample in
+            let transformedCamera = CameraTransformTimelineBuilder.resolve(
+              baseResolution: cameraResolution,
+              cameraParams: cameraParams,
+              screenZoom: sample.zoom
+            )
+            let animatedCamera = CameraAnimationTimelineBuilder.resolve(
+              canvasSize: target,
+              baseResolution: cameraResolution,
+              transformedResolution: transformedCamera,
+              cameraParams: cameraParams,
+              time: sample.time,
+              totalDuration: effectiveDuration,
+              zoomState: sample.zoomState
+            )
+            return fittedTransform(
+              for: cameraTrack,
+              sourceSize: cameraSourceSize,
+              destinationRect: animatedCamera.frame,
+              fitMode: cameraFitMode,
+              mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
+            )
+          }
+          let cameraOpacities = cameraPresentation.map { sample in
+            let transformedCamera = CameraTransformTimelineBuilder.resolve(
+              baseResolution: cameraResolution,
+              cameraParams: cameraParams,
+              screenZoom: sample.zoom
+            )
+            let animatedCamera = CameraAnimationTimelineBuilder.resolve(
+              canvasSize: target,
+              baseResolution: cameraResolution,
+              transformedResolution: transformedCamera,
+              cameraParams: cameraParams,
+              time: sample.time,
+              totalDuration: effectiveDuration,
+              zoomState: sample.zoomState
+            )
+            return Float(max(0.0, min(1.0, animatedCamera.opacity)))
+          }
 
-          if
-            cameraParams.zoomBehavior == .scaleWithScreenZoom,
-            cameraParams.layoutPreset != .backgroundBehind,
-            params.zoomEnabled,
-            let cursorRecording,
-            !cursorRecording.frames.isEmpty
+          if let firstTransform = cameraTransforms.first {
+            cameraLayerInstruction.setTransform(firstTransform, at: .zero)
+          }
+          if let firstOpacity = cameraOpacities.first {
+            cameraLayerInstruction.setOpacity(firstOpacity, at: .zero)
+          }
+
+          if cameraTransforms.count >= 2,
+            let firstTransform = cameraTransforms.first,
+            cameraTransforms.dropFirst().contains(where: {
+              !transformsApproximatelyEqual($0, firstTransform)
+            })
           {
-            let effectiveDuration = min(insertionDuration.seconds, screenAsset.duration.seconds)
-            let zoomSamples = buildExportZoomSamples(
-              recording: cursorRecording,
-              params: params,
-              target: target,
-              contentRect: screenContentRect,
-              contentWidth: contentWidth,
-              contentHeight: contentHeight,
-              videoDuration: effectiveDuration
-            ).filter { $0.time <= effectiveDuration + 0.0001 }
+            for idx in 0..<(cameraPresentation.count - 1) {
+              let startSeconds = cameraPresentation[idx].time
+              let endSeconds = min(cameraPresentation[idx + 1].time, effectiveDuration)
+              guard endSeconds > startSeconds else { continue }
 
-            if zoomSamples.count >= 2 {
-              let cameraTransforms = zoomSamples.map { sample in
-                let resolvedCamera = CameraTransformTimelineBuilder.resolve(
-                  baseResolution: cameraResolution,
-                  cameraParams: cameraParams,
-                  screenZoom: sample.zoom
-                )
-                return fittedTransform(
-                  for: cameraTrack,
-                  sourceSize: cameraSourceSize,
-                  destinationRect: resolvedCamera.frame,
-                  fitMode: cameraFitMode,
-                  mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
-                )
-              }
+              let startTime = CMTime(seconds: startSeconds, preferredTimescale: 600)
+              let endTime = CMTime(seconds: endSeconds, preferredTimescale: 600)
+              let timeRange = CMTimeRange(start: startTime, end: endTime)
+              cameraLayerInstruction.setTransformRamp(
+                fromStart: cameraTransforms[idx],
+                toEnd: cameraTransforms[idx + 1],
+                timeRange: timeRange
+              )
+            }
+          }
 
-              if let firstTransform = cameraTransforms.first,
-                cameraTransforms.dropFirst().contains(where: {
-                  !transformsApproximatelyEqual($0, firstTransform)
-                })
-              {
-                cameraLayerInstruction.setTransform(firstTransform, at: .zero)
+          if cameraOpacities.count >= 2,
+            let firstOpacity = cameraOpacities.first,
+            cameraOpacities.dropFirst().contains(where: { abs($0 - firstOpacity) > 0.0001 })
+          {
+            for idx in 0..<(cameraPresentation.count - 1) {
+              let startSeconds = cameraPresentation[idx].time
+              let endSeconds = min(cameraPresentation[idx + 1].time, effectiveDuration)
+              guard endSeconds > startSeconds else { continue }
 
-                for idx in 0..<(zoomSamples.count - 1) {
-                  let startSeconds = zoomSamples[idx].time
-                  let endSeconds = min(zoomSamples[idx + 1].time, effectiveDuration)
-                  guard endSeconds > startSeconds else { continue }
-
-                  let startTime = CMTime(seconds: startSeconds, preferredTimescale: 600)
-                  let endTime = CMTime(seconds: endSeconds, preferredTimescale: 600)
-                  let timeRange = CMTimeRange(start: startTime, end: endTime)
-                  cameraLayerInstruction.setTransformRamp(
-                    fromStart: cameraTransforms[idx],
-                    toEnd: cameraTransforms[idx + 1],
-                    timeRange: timeRange
-                  )
-                }
-              }
+              let startTime = CMTime(seconds: startSeconds, preferredTimescale: 600)
+              let endTime = CMTime(seconds: endSeconds, preferredTimescale: 600)
+              let timeRange = CMTimeRange(start: startTime, end: endTime)
+              cameraLayerInstruction.setOpacityRamp(
+                fromStartOpacity: cameraOpacities[idx],
+                toEndOpacity: cameraOpacities[idx + 1],
+                timeRange: timeRange
+              )
             }
           }
 
@@ -1034,6 +1083,7 @@ final class CompositionBuilder {
     var smoothCy: CGFloat = focusY
     var didLogZoomSmootherProfile = false
     var frameIndex = 0
+    var stableZoomStartTime: Double?
 
     let defaultSpriteID: Int =
       frames.first(where: inBounds)?.spriteID
@@ -1067,6 +1117,18 @@ final class CompositionBuilder {
       } else {
         zoomHysteresis.reset()
         stableZoomActive = false
+      }
+
+      if stableZoomActive {
+        if let manualSegments = params.zoomSegments,
+          let activeSegment = manualSegments.first(where: { $0.contains(timeMs: Int(t * 1000)) })
+        {
+          stableZoomStartTime = Double(activeSegment.startMs) / 1000.0
+        } else if stableZoomStartTime == nil {
+          stableZoomStartTime = t
+        }
+      } else {
+        stableZoomStartTime = nil
       }
 
       let targetZ: CGFloat = stableZoomActive ? params.zoomFactor : 1.0
@@ -1124,12 +1186,119 @@ final class CompositionBuilder {
           time: t,
           zoom: smoothZ,
           centerX: smoothCx,
-          centerY: smoothCy
+          centerY: smoothCy,
+          isActive: stableZoomActive,
+          localTime: stableZoomStartTime.map { max(t - $0, 0.0) }
         )
       )
     }
 
     return samples
+  }
+
+  private func buildCameraPresentationSamples(
+    params: CompositionParams,
+    cameraParams: CameraCompositionParams,
+    cursorRecording: CursorRecording?,
+    target: CGSize,
+    contentRect: CGRect,
+    contentWidth: Double,
+    contentHeight: Double,
+    effectiveDuration: Double
+  ) -> [CameraPresentationSample] {
+    let needsZoomSamples =
+      params.zoomEnabled
+      && cursorRecording?.frames.isEmpty == false
+      && (
+        cameraParams.zoomBehavior == .scaleWithScreenZoom
+          || cameraParams.zoomEmphasisPreset == .pulse
+      )
+
+    var samples: [CameraPresentationSample] = []
+
+    if needsZoomSamples, let cursorRecording {
+      let zoomSamples = buildExportZoomSamples(
+        recording: cursorRecording,
+        params: params,
+        target: target,
+        contentRect: contentRect,
+        contentWidth: contentWidth,
+        contentHeight: contentHeight,
+        videoDuration: effectiveDuration
+      ).filter { $0.time <= effectiveDuration + 0.0001 }
+
+      samples = zoomSamples.map {
+        CameraPresentationSample(
+          time: $0.time,
+          zoom: $0.zoom,
+          zoomState: CameraAnimationZoomState(isActive: $0.isActive, localTime: $0.localTime)
+        )
+      }
+    }
+
+    guard CameraAnimationTimelineBuilder.hasPresentationEffects(cameraParams) else {
+      return samples
+    }
+
+    let fps = params.fpsHint > 0 ? Double(params.fpsHint) : 30.0
+    let animationStep = 1.0 / max(fps, 30.0)
+    var timePoints = Set(samples.map { roundedSampleTime($0.time) })
+    timePoints.insert(0.0)
+    timePoints.insert(roundedSampleTime(effectiveDuration))
+
+    if cameraParams.introPreset != .none {
+      let introDuration = min(Double(cameraParams.introDurationMs) / 1000.0, effectiveDuration)
+      var t = 0.0
+      while t <= introDuration + 0.0001 {
+        timePoints.insert(roundedSampleTime(t))
+        t += animationStep
+      }
+      timePoints.insert(roundedSampleTime(introDuration))
+    }
+
+    if cameraParams.outroPreset != .none {
+      let outroDuration = min(Double(cameraParams.outroDurationMs) / 1000.0, effectiveDuration)
+      let outroStart = max(effectiveDuration - outroDuration, 0.0)
+      var t = outroStart
+      while t <= effectiveDuration + 0.0001 {
+        timePoints.insert(roundedSampleTime(t))
+        t += animationStep
+      }
+      timePoints.insert(roundedSampleTime(outroStart))
+    }
+
+    if samples.isEmpty {
+      return timePoints.sorted().map {
+        CameraPresentationSample(
+          time: $0,
+          zoom: 1.0,
+          zoomState: .inactive
+        )
+      }
+    }
+
+    let sampleLookup = Dictionary(uniqueKeysWithValues: samples.map { (roundedSampleTime($0.time), $0) })
+    let sortedSamples = samples.sorted { $0.time < $1.time }
+    var index = 0
+
+    return timePoints.sorted().map { time in
+      if let sample = sampleLookup[time] {
+        return sample
+      }
+      while index < sortedSamples.count - 1 && sortedSamples[index + 1].time <= time + 0.0001 {
+        index += 1
+      }
+      let source = sortedSamples[min(index, sortedSamples.count - 1)]
+      return CameraPresentationSample(
+        time: time,
+        zoom: source.zoom,
+        zoomState: source.zoomState
+      )
+    }
+  }
+
+  private func roundedSampleTime(_ time: Double) -> Double {
+    (time * 1000.0).rounded() / 1000.0
   }
 
   private func transformsApproximatelyEqual(

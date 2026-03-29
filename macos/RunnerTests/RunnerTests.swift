@@ -150,6 +150,22 @@ final class RecordingMetadataTests: XCTestCase {
 
     XCTAssertEqual(decoded.editorSeed.cameraZoomBehavior, .fixed)
     XCTAssertEqual(decoded.editorSeed.cameraZoomScaleMultiplier, 0.35, accuracy: 0.0001)
+    XCTAssertEqual(decoded.editorSeed.cameraIntroPreset, .none)
+    XCTAssertEqual(decoded.editorSeed.cameraOutroPreset, .none)
+    XCTAssertEqual(decoded.editorSeed.cameraZoomEmphasisPreset, .none)
+    XCTAssertEqual(
+      decoded.editorSeed.cameraIntroDurationMs,
+      CameraCompositionParams.defaultIntroDurationMs
+    )
+    XCTAssertEqual(
+      decoded.editorSeed.cameraOutroDurationMs,
+      CameraCompositionParams.defaultOutroDurationMs
+    )
+    XCTAssertEqual(
+      decoded.editorSeed.cameraZoomEmphasisStrength,
+      CameraCompositionParams.defaultZoomEmphasisStrength,
+      accuracy: 0.0001
+    )
   }
 
   func testLegacyMetadataReadMigratesToVersion2Schema() throws {
@@ -423,6 +439,170 @@ final class CameraTransformTimelineBuilderTests: XCTestCase {
       contentMode: .fill,
       zoomBehavior: behavior,
       zoomScaleMultiplier: multiplier,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+  }
+}
+
+final class CameraAnimationTimelineBuilderTests: XCTestCase {
+  func testNoneKeepsFrameAndOpacityUnchanged() {
+    let params = makeParams()
+    let canvasSize = CGSize(width: 1000, height: 600)
+    let base = CameraLayoutResolver.effectiveFrame(canvasSize: canvasSize, params: params)
+    let transformed = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.0
+    )
+
+    let resolved = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: base,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: 0.5,
+      totalDuration: 2.0
+    )
+
+    XCTAssertEqual(resolved.frame, transformed.frame)
+    XCTAssertEqual(resolved.opacity, 1.0, accuracy: 0.0001)
+    XCTAssertFalse(resolved.shouldBypass)
+  }
+
+  func testPopScalesAroundCenter() {
+    var params = makeParams()
+    params.introPreset = .pop
+    let canvasSize = CGSize(width: 1000, height: 600)
+    let base = CameraLayoutResolver.effectiveFrame(canvasSize: canvasSize, params: params)
+    let transformed = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.0
+    )
+
+    let resolved = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: base,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: 0.0,
+      totalDuration: 2.0
+    )
+
+    XCTAssertEqual(resolved.frame.midX, transformed.frame.midX, accuracy: 0.0001)
+    XCTAssertEqual(resolved.frame.midY, transformed.frame.midY, accuracy: 0.0001)
+    XCTAssertLessThan(resolved.frame.width, transformed.frame.width)
+    XCTAssertEqual(resolved.opacity, 0.0, accuracy: 0.0001)
+  }
+
+  func testSlideUsesLayoutEdgeForTopRight() {
+    var params = makeParams()
+    params.layoutPreset = .overlayTopRight
+    params.introPreset = .slide
+    let canvasSize = CGSize(width: 1000, height: 600)
+    let base = CameraLayoutResolver.effectiveFrame(canvasSize: canvasSize, params: params)
+    let transformed = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.0
+    )
+
+    let resolved = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: base,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: 0.0,
+      totalDuration: 2.0
+    )
+
+    XCTAssertGreaterThan(resolved.frame.minX, canvasSize.width)
+    XCTAssertEqual(resolved.opacity, 0.0, accuracy: 0.0001)
+  }
+
+  func testPulseOnlyAppliesDuringActiveZoom() {
+    var params = makeParams()
+    params.zoomEmphasisPreset = .pulse
+    params.zoomEmphasisStrength = 0.10
+    let canvasSize = CGSize(width: 1000, height: 600)
+    let base = CameraLayoutResolver.effectiveFrame(canvasSize: canvasSize, params: params)
+    let transformed = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 1.0
+    )
+
+    let inactive = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: base,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: 0.5,
+      totalDuration: 2.0,
+      zoomState: .inactive
+    )
+    let active = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: base,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: 0.5,
+      totalDuration: 2.0,
+      zoomState: CameraAnimationZoomState(isActive: true, localTime: 0.125)
+    )
+
+    XCTAssertEqual(inactive.frame, transformed.frame)
+    XCTAssertEqual(active.frame.width, transformed.frame.width * 1.05, accuracy: 0.0001)
+    XCTAssertEqual(active.frame.midX, transformed.frame.midX, accuracy: 0.0001)
+    XCTAssertEqual(active.frame.midY, transformed.frame.midY, accuracy: 0.0001)
+  }
+
+  func testBackgroundBehindBypassesPresentationEffects() {
+    var params = makeParams()
+    params.layoutPreset = .backgroundBehind
+    params.introPreset = .slide
+    params.outroPreset = .fade
+    params.zoomEmphasisPreset = .pulse
+    let canvasSize = CGSize(width: 1000, height: 600)
+    let base = CameraLayoutResolver.effectiveFrame(canvasSize: canvasSize, params: params)
+    let transformed = CameraTransformTimelineBuilder.resolve(
+      baseResolution: base,
+      cameraParams: params,
+      screenZoom: 2.0
+    )
+
+    let resolved = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: base,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: 0.25,
+      totalDuration: 2.0,
+      zoomState: CameraAnimationZoomState(isActive: true, localTime: 0.125)
+    )
+
+    XCTAssertTrue(resolved.shouldBypass)
+    XCTAssertEqual(resolved.frame, transformed.frame)
+    XCTAssertEqual(resolved.opacity, params.opacity, accuracy: 0.0001)
+  }
+
+  private func makeParams() -> CameraCompositionParams {
+    CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .circle,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: true,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
       borderWidth: 0.0,
       borderColorArgb: nil,
       shadowPreset: 0,
@@ -789,7 +969,7 @@ final class LetterboxExporterTests: XCTestCase {
     var timeRange = CMTimeRange.zero
 
     let hasRamp = cameraInstruction.getTransformRamp(
-      for: CMTime(seconds: 0.45, preferredTimescale: 600),
+      for: CMTime(seconds: 0.52, preferredTimescale: 600),
       start: &startTransform,
       end: &endTransform,
       timeRange: &timeRange
@@ -891,6 +1071,365 @@ final class LetterboxExporterTests: XCTestCase {
         "fixed camera behavior should not produce a time-varying camera transform"
       )
     }
+  }
+
+  func testIntroFadeAddsCameraOpacityRampAtStart() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    var cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+    cameraParams.introPreset = .fade
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: nil,
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    var startOpacity: Float = 0
+    var endOpacity: Float = 0
+    var timeRange = CMTimeRange.zero
+
+    let hasRamp = cameraInstruction.getOpacityRamp(
+      for: CMTime(seconds: 0.05, preferredTimescale: 600),
+      startOpacity: &startOpacity,
+      endOpacity: &endOpacity,
+      timeRange: &timeRange
+    )
+
+    XCTAssertTrue(hasRamp)
+    XCTAssertLessThan(startOpacity, endOpacity)
+    XCTAssertGreaterThan(timeRange.duration.seconds, 0.0)
+  }
+
+  func testOutroFadeAddsCameraOpacityRampAtEnd() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    var cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+    cameraParams.outroPreset = .fade
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: nil,
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    var startOpacity: Float = 0
+    var endOpacity: Float = 0
+    var timeRange = CMTimeRange.zero
+
+    let hasRamp = cameraInstruction.getOpacityRamp(
+      for: CMTime(seconds: 0.95, preferredTimescale: 600),
+      startOpacity: &startOpacity,
+      endOpacity: &endOpacity,
+      timeRange: &timeRange
+    )
+
+    XCTAssertTrue(hasRamp)
+    XCTAssertGreaterThan(startOpacity, endOpacity)
+    XCTAssertGreaterThan(timeRange.duration.seconds, 0.0)
+  }
+
+  func testZoomPulseAddsTransformRampDuringActiveZoom() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    var cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+    cameraParams.zoomEmphasisPreset = .pulse
+    cameraParams.zoomEmphasisStrength = 0.10
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: makeZoomCursorRecording(),
+        cameraAssetIsPreStyled: false
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    let probeTimes: [Double] = [0.50, 0.52, 0.55, 0.58, 0.62, 0.68]
+    var foundVaryingRamp = false
+
+    for probeTime in probeTimes {
+      var startTransform = CGAffineTransform.identity
+      var endTransform = CGAffineTransform.identity
+      var timeRange = CMTimeRange.zero
+
+      let hasRamp = cameraInstruction.getTransformRamp(
+        for: CMTime(seconds: probeTime, preferredTimescale: 600),
+        start: &startTransform,
+        end: &endTransform,
+        timeRange: &timeRange
+      )
+
+      if hasRamp,
+        timeRange.duration.seconds > 0.0,
+        !transformsApproximatelyEqual(startTransform, endTransform)
+      {
+        foundVaryingRamp = true
+        break
+      }
+    }
+
+    XCTAssertTrue(foundVaryingRamp)
+  }
+
+  func testIntroAnimationAppliesToPreStyledCameraAsset() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 320, height: 180),
+      durationSeconds: 1.0,
+      color: .systemBlue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .systemRed
+    )
+
+    let params = CompositionParams(
+      targetSize: CGSize(width: 640, height: 360),
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: true,
+      zoomFactor: 1.8,
+      followStrength: 0.15,
+      fpsHint: 30,
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0
+    )
+    var cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayTopRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.2,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+    cameraParams.introPreset = .pop
+
+    let builder = CompositionBuilder()
+    let result = try XCTUnwrap(
+      builder.buildExport(
+        asset: AVAsset(url: screenURL),
+        cameraAsset: AVAsset(url: cameraURL),
+        params: params,
+        cameraParams: cameraParams,
+        cursorRecording: nil,
+        cameraAssetIsPreStyled: true
+      )
+    )
+
+    let instruction = try XCTUnwrap(
+      result.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction
+    )
+    let cameraInstruction = try XCTUnwrap(instruction.layerInstructions.first)
+    var startTransform = CGAffineTransform.identity
+    var endTransform = CGAffineTransform.identity
+    var timeRange = CMTimeRange.zero
+
+    let hasRamp = cameraInstruction.getTransformRamp(
+      for: CMTime(seconds: 0.05, preferredTimescale: 600),
+      start: &startTransform,
+      end: &endTransform,
+      timeRange: &timeRange
+    )
+
+    XCTAssertTrue(hasRamp)
+    XCTAssertFalse(transformsApproximatelyEqual(startTransform, endTransform))
   }
 
   func testChromaKeySeparateCameraExportRemovesKeyColorInFinalCrop() throws {
@@ -2125,6 +2664,26 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     XCTAssertEqual(camera["zoomBehavior"] as? String, CameraZoomBehavior.fixed.rawValue)
     let zoomScaleMultiplier = try XCTUnwrap(camera["zoomScaleMultiplier"] as? Double)
     XCTAssertEqual(zoomScaleMultiplier, 0.35, accuracy: 0.0001)
+    XCTAssertEqual(camera["introPreset"] as? String, CameraIntroPreset.none.rawValue)
+    XCTAssertEqual(camera["outroPreset"] as? String, CameraOutroPreset.none.rawValue)
+    XCTAssertEqual(
+      camera["zoomEmphasisPreset"] as? String,
+      CameraZoomEmphasisPreset.none.rawValue
+    )
+    XCTAssertEqual(
+      camera["introDurationMs"] as? Int,
+      CameraCompositionParams.defaultIntroDurationMs
+    )
+    XCTAssertEqual(
+      camera["outroDurationMs"] as? Int,
+      CameraCompositionParams.defaultOutroDurationMs
+    )
+    let zoomEmphasisStrength = try XCTUnwrap(camera["zoomEmphasisStrength"] as? Double)
+    XCTAssertEqual(
+      zoomEmphasisStrength,
+      CameraCompositionParams.defaultZoomEmphasisStrength,
+      accuracy: 0.0001
+    )
   }
 
   func testResolveCameraCompositionParamsAcceptsScaleWithZoomMultiplier() throws {
@@ -2143,6 +2702,32 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     XCTAssertEqual(params?.zoomBehavior, .scaleWithScreenZoom)
     let zoomScaleMultiplier = try XCTUnwrap(params?.zoomScaleMultiplier)
     XCTAssertEqual(zoomScaleMultiplier, 0.6, accuracy: 0.0001)
+  }
+
+  func testResolveCameraCompositionParamsAcceptsAnimationOverrides() throws {
+    let facade = ScreenRecorderFacade()
+
+    let params = facade.resolveCameraCompositionParams(
+      source: "/tmp/recording.mov",
+      args: [
+        "cameraVisible": true,
+        "cameraLayoutPreset": "overlayTopRight",
+        "cameraIntroPreset": "pop",
+        "cameraOutroPreset": "slide",
+        "cameraZoomEmphasisPreset": "pulse",
+        "cameraIntroDurationMs": 300,
+        "cameraOutroDurationMs": 260,
+        "cameraZoomEmphasisStrength": 0.12,
+      ]
+    )
+
+    XCTAssertEqual(params?.introPreset, .pop)
+    XCTAssertEqual(params?.outroPreset, .slide)
+    XCTAssertEqual(params?.zoomEmphasisPreset, .pulse)
+    XCTAssertEqual(params?.introDurationMs, 300)
+    XCTAssertEqual(params?.outroDurationMs, 260)
+    let zoomEmphasisStrength = try XCTUnwrap(params?.zoomEmphasisStrength)
+    XCTAssertEqual(zoomEmphasisStrength, 0.12, accuracy: 0.0001)
   }
 
   func testSeparateCameraExportSanitizesOnlyUnsupportedChromaKeyStyling() {

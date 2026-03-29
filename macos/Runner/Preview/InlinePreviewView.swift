@@ -91,6 +91,8 @@ final class InlinePreviewView: NSView {
   private var debugTick: Int = 0
   private var lastZoomTime: Double = 0
   private var didLogZoomSmootherProfile: Bool = false
+  private var currentZoomActive = false
+  private var currentZoomStartTime: Double?
 
   // Token to prevent race conditions between concurrent open() calls
   private var currentOpenToken: UUID?
@@ -1190,7 +1192,7 @@ final class InlinePreviewView: NSView {
     defer { CATransaction.commit() }
     updateCursorLayer(tick: tickState)
     let screenZoom = updateZoom(tick: tickState)
-    updateCameraPreviewGeometry(screenZoom: screenZoom)
+    updateCameraPreviewGeometry(time: t, screenZoom: screenZoom)
 
     emitPlayerEvent([
       "type": "playerTick",
@@ -1582,11 +1584,13 @@ final class InlinePreviewView: NSView {
     cameraPlayerLayer.setAffineTransform(
       params.mirror ? CGAffineTransform(scaleX: -1.0, y: 1.0) : .identity
     )
-    cameraContainerLayer.opacity = Float(max(0.0, min(1.0, params.opacity)))
-    updateCameraPreviewGeometry(screenZoom: smoothZoom)
+    updateCameraPreviewGeometry(
+      time: player?.currentTime().seconds ?? 0,
+      screenZoom: smoothZoom
+    )
   }
 
-  private func updateCameraPreviewGeometry(screenZoom: CGFloat) {
+  private func updateCameraPreviewGeometry(time: Double, screenZoom: CGFloat) {
     guard
       let canvasSize = currentCompositionParams?.targetSize,
       let cameraContainerLayer,
@@ -1608,7 +1612,7 @@ final class InlinePreviewView: NSView {
       canvasSize: canvasSize,
       params: params
     )
-    let resolved = CameraTransformTimelineBuilder.resolve(
+    let transformed = CameraTransformTimelineBuilder.resolve(
       baseResolution: baseResolution,
       cameraParams: params,
       screenZoom: screenZoom
@@ -1618,10 +1622,20 @@ final class InlinePreviewView: NSView {
       return
     }
 
-    let frame = resolved.frame.integral
+    let animated = CameraAnimationTimelineBuilder.resolve(
+      canvasSize: canvasSize,
+      baseResolution: baseResolution,
+      transformedResolution: transformed,
+      cameraParams: params,
+      time: time,
+      totalDuration: player?.currentItem?.duration.seconds ?? 0,
+      zoomState: resolvedCameraAnimationZoomState(time: time)
+    )
+
+    let frame = animated.frame.integral
     cameraContainerLayer.isHidden = false
     cameraContainerLayer.frame = frame
-    cameraContainerLayer.opacity = Float(max(0.0, min(1.0, params.opacity)))
+    cameraContainerLayer.opacity = Float(max(0.0, min(1.0, animated.opacity)))
 
     let bounds = CGRect(origin: .zero, size: frame.size)
     cameraPlayerLayer.frame = bounds
@@ -1758,7 +1772,7 @@ final class InlinePreviewView: NSView {
     CATransaction.setDisableActions(true)
     updateCursorLayer(tick: tick)
     let screenZoom = updateZoom(tick: tick, snap: snap)
-    updateCameraPreviewGeometry(screenZoom: screenZoom)
+    updateCameraPreviewGeometry(time: normalizedTime, screenZoom: screenZoom)
     CATransaction.commit()
   }
 
@@ -1850,11 +1864,15 @@ final class InlinePreviewView: NSView {
       let zoomedLayer = self.zoomedContentLayer
     else {
       self.zoomedContentLayer?.setAffineTransform(.identity)
+      currentZoomActive = false
+      currentZoomStartTime = nil
       return 1.0
     }
 
     guard let frame = tick.frame else {
       zoomedLayer.setAffineTransform(.identity)
+      currentZoomActive = false
+      currentZoomStartTime = nil
       return 1.0
     }
 
@@ -1901,6 +1919,15 @@ final class InlinePreviewView: NSView {
       zoomHysteresis.reset()
       stableZoomActive = false
     }
+
+    if stableZoomActive {
+      if !currentZoomActive {
+        currentZoomStartTime = time
+      }
+    } else {
+      currentZoomStartTime = nil
+    }
+    currentZoomActive = stableZoomActive
 
     let targetZ: CGFloat = stableZoomActive ? params.zoomFactor : 1.0
 
@@ -2101,6 +2128,8 @@ final class InlinePreviewView: NSView {
       defaultSpriteID = nil
     }
     zoomHysteresis.reset()
+    currentZoomActive = false
+    currentZoomStartTime = nil
 
     // Reset center to content center if we have layout/params, otherwise 0
     if let layout = currentLayout {
@@ -2113,6 +2142,27 @@ final class InlinePreviewView: NSView {
     }
 
     zoomedContentLayer?.setAffineTransform(.identity)
+  }
+
+  private func resolvedCameraAnimationZoomState(time: Double) -> CameraAnimationZoomState {
+    guard currentZoomActive else { return .inactive }
+    if
+      let manualSegments = currentCompositionParams?.zoomSegments,
+      let activeSegment = manualSegments.first(where: { $0.contains(timeMs: Int(time * 1000)) })
+    {
+      return CameraAnimationZoomState(
+        isActive: true,
+        localTime: max(time - (Double(activeSegment.startMs) / 1000.0), 0.0)
+      )
+    }
+
+    guard let currentZoomStartTime else {
+      return CameraAnimationZoomState(isActive: true, localTime: 0.0)
+    }
+    return CameraAnimationZoomState(
+      isActive: true,
+      localTime: max(time - currentZoomStartTime, 0.0)
+    )
   }
 
   private func clearCursorCaches() {

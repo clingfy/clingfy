@@ -92,6 +92,93 @@ enum CameraZoomBehavior: String, Codable {
   }
 }
 
+enum CameraIntroPreset: String, Codable {
+  case none = "none"
+  case fade = "fade"
+  case pop = "pop"
+  case slide = "slide"
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let rawValue = try container.decode(String.self)
+    self = CameraIntroPreset.from(rawValue: rawValue)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  static func from(rawValue: String?) -> CameraIntroPreset {
+    switch rawValue {
+    case CameraIntroPreset.fade.rawValue:
+      return .fade
+    case CameraIntroPreset.pop.rawValue:
+      return .pop
+    case CameraIntroPreset.slide.rawValue:
+      return .slide
+    default:
+      return .none
+    }
+  }
+}
+
+enum CameraOutroPreset: String, Codable {
+  case none = "none"
+  case fade = "fade"
+  case shrink = "shrink"
+  case slide = "slide"
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let rawValue = try container.decode(String.self)
+    self = CameraOutroPreset.from(rawValue: rawValue)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  static func from(rawValue: String?) -> CameraOutroPreset {
+    switch rawValue {
+    case CameraOutroPreset.fade.rawValue:
+      return .fade
+    case CameraOutroPreset.shrink.rawValue:
+      return .shrink
+    case CameraOutroPreset.slide.rawValue:
+      return .slide
+    default:
+      return .none
+    }
+  }
+}
+
+enum CameraZoomEmphasisPreset: String, Codable {
+  case none = "none"
+  case pulse = "pulse"
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let rawValue = try container.decode(String.self)
+    self = CameraZoomEmphasisPreset.from(rawValue: rawValue)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  static func from(rawValue: String?) -> CameraZoomEmphasisPreset {
+    switch rawValue {
+    case CameraZoomEmphasisPreset.pulse.rawValue:
+      return .pulse
+    default:
+      return .none
+    }
+  }
+}
+
 enum CameraShape: String, Codable {
   case circle = "circle"
   case roundedRect = "roundedRect"

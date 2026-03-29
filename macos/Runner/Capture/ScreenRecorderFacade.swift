@@ -1718,6 +1718,12 @@ final class ScreenRecorderFacade: NSObject {
       contentMode: editorSeed.cameraContentMode,
       zoomBehavior: editorSeed.cameraZoomBehavior,
       zoomScaleMultiplier: editorSeed.cameraZoomScaleMultiplier,
+      introPreset: editorSeed.cameraIntroPreset,
+      outroPreset: editorSeed.cameraOutroPreset,
+      zoomEmphasisPreset: editorSeed.cameraZoomEmphasisPreset,
+      introDurationMs: editorSeed.cameraIntroDurationMs,
+      outroDurationMs: editorSeed.cameraOutroDurationMs,
+      zoomEmphasisStrength: editorSeed.cameraZoomEmphasisStrength,
       borderWidth: editorSeed.cameraBorderWidth,
       borderColorArgb: editorSeed.cameraBorderColorArgb,
       shadowPreset: editorSeed.cameraShadow,
@@ -1739,6 +1745,12 @@ final class ScreenRecorderFacade: NSObject {
       "contentMode": params.contentMode.rawValue,
       "zoomBehavior": params.zoomBehavior.rawValue,
       "zoomScaleMultiplier": params.zoomScaleMultiplier,
+      "introPreset": params.introPreset.rawValue,
+      "outroPreset": params.outroPreset.rawValue,
+      "zoomEmphasisPreset": params.zoomEmphasisPreset.rawValue,
+      "introDurationMs": params.introDurationMs,
+      "outroDurationMs": params.outroDurationMs,
+      "zoomEmphasisStrength": params.zoomEmphasisStrength,
       "borderWidth": params.borderWidth,
       "shadowPreset": params.shadowPreset,
       "chromaKeyEnabled": params.chromaKeyEnabled,
@@ -1816,6 +1828,28 @@ final class ScreenRecorderFacade: NSObject {
     }
     if let zoomScaleMultiplier = doubleValue(args["cameraZoomScaleMultiplier"]) {
       params.zoomScaleMultiplier = min(max(zoomScaleMultiplier, 0.0), 1.0)
+    }
+    if let rawIntroPreset = args["cameraIntroPreset"] as? String {
+      params.introPreset = CameraIntroPreset.from(rawValue: rawIntroPreset)
+    }
+    if let rawOutroPreset = args["cameraOutroPreset"] as? String {
+      params.outroPreset = CameraOutroPreset.from(rawValue: rawOutroPreset)
+    }
+    if let rawZoomEmphasisPreset = args["cameraZoomEmphasisPreset"] as? String {
+      params.zoomEmphasisPreset = CameraZoomEmphasisPreset.from(rawValue: rawZoomEmphasisPreset)
+    }
+    if let introDurationMs = args["cameraIntroDurationMs"] as? Int {
+      params.introDurationMs = min(max(introDurationMs, 80), 600)
+    } else if let introDurationMs = doubleValue(args["cameraIntroDurationMs"]) {
+      params.introDurationMs = min(max(Int(introDurationMs.rounded()), 80), 600)
+    }
+    if let outroDurationMs = args["cameraOutroDurationMs"] as? Int {
+      params.outroDurationMs = min(max(outroDurationMs, 80), 600)
+    } else if let outroDurationMs = doubleValue(args["cameraOutroDurationMs"]) {
+      params.outroDurationMs = min(max(Int(outroDurationMs.rounded()), 80), 600)
+    }
+    if let zoomEmphasisStrength = doubleValue(args["cameraZoomEmphasisStrength"]) {
+      params.zoomEmphasisStrength = min(max(zoomEmphasisStrength, 0.0), 0.2)
     }
     if let sizeFactor = doubleValue(args["cameraSizeFactor"]) {
       params.sizeFactor = sizeFactor
@@ -2550,6 +2584,12 @@ final class ScreenRecorderFacade: NSObject {
       cameraContentMode: .fill,
       cameraZoomBehavior: .fixed,
       cameraZoomScaleMultiplier: CameraCompositionParams.defaultZoomScaleMultiplier,
+      cameraIntroPreset: .none,
+      cameraOutroPreset: .none,
+      cameraZoomEmphasisPreset: .none,
+      cameraIntroDurationMs: CameraCompositionParams.defaultIntroDurationMs,
+      cameraOutroDurationMs: CameraCompositionParams.defaultOutroDurationMs,
+      cameraZoomEmphasisStrength: CameraCompositionParams.defaultZoomEmphasisStrength,
       cameraChromaKeyEnabled: camera.chromaKeyEnabled,
       cameraChromaKeyStrength: camera.chromaKeyStrength,
       cameraChromaKeyColorArgb: camera.chromaKeyColor.argbIntValue

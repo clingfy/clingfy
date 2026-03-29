@@ -29,6 +29,15 @@ class PostCameraSection extends StatelessWidget {
     required this.onZoomBehaviorChanged,
     required this.onZoomScaleMultiplierChanged,
     required this.onZoomScaleMultiplierChangeEnd,
+    required this.onIntroPresetChanged,
+    required this.onOutroPresetChanged,
+    required this.onZoomEmphasisPresetChanged,
+    required this.onIntroDurationChanged,
+    required this.onIntroDurationChangeEnd,
+    required this.onOutroDurationChanged,
+    required this.onOutroDurationChangeEnd,
+    required this.onZoomEmphasisStrengthChanged,
+    required this.onZoomEmphasisStrengthChangeEnd,
     required this.onManualCenterXChanged,
     required this.onManualCenterXChangeEnd,
     required this.onManualCenterYChanged,
@@ -51,6 +60,15 @@ class PostCameraSection extends StatelessWidget {
   final ValueChanged<CameraZoomBehavior> onZoomBehaviorChanged;
   final ValueChanged<double> onZoomScaleMultiplierChanged;
   final ValueChanged<double> onZoomScaleMultiplierChangeEnd;
+  final ValueChanged<CameraIntroPreset> onIntroPresetChanged;
+  final ValueChanged<CameraOutroPreset> onOutroPresetChanged;
+  final ValueChanged<CameraZoomEmphasisPreset> onZoomEmphasisPresetChanged;
+  final ValueChanged<double> onIntroDurationChanged;
+  final ValueChanged<double> onIntroDurationChangeEnd;
+  final ValueChanged<double> onOutroDurationChanged;
+  final ValueChanged<double> onOutroDurationChangeEnd;
+  final ValueChanged<double> onZoomEmphasisStrengthChanged;
+  final ValueChanged<double> onZoomEmphasisStrengthChangeEnd;
   final ValueChanged<double> onManualCenterXChanged;
   final ValueChanged<double> onManualCenterXChangeEnd;
   final ValueChanged<double> onManualCenterYChanged;
@@ -211,6 +229,124 @@ class PostCameraSection extends StatelessWidget {
                 divisions: 100,
                 onChanged: onZoomScaleMultiplierChanged,
                 onChangeEnd: onZoomScaleMultiplierChangeEnd,
+                accentColor: accentColor,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSidebarTokens.sectionGap),
+          AppFormRow(
+            label: 'Intro',
+            control: PlatformDropdown<CameraIntroPreset>(
+              value: camera.introPreset,
+              items: const [
+                PlatformMenuItem(value: CameraIntroPreset.none, label: 'None'),
+                PlatformMenuItem(value: CameraIntroPreset.fade, label: 'Fade'),
+                PlatformMenuItem(value: CameraIntroPreset.pop, label: 'Pop'),
+                PlatformMenuItem(
+                  value: CameraIntroPreset.slide,
+                  label: 'Slide',
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  onIntroPresetChanged(value);
+                }
+              },
+            ),
+          ),
+          if (camera.introPreset != CameraIntroPreset.none) ...[
+            const SizedBox(height: AppSidebarTokens.sectionGap),
+            AppSliderRow(
+              label: 'Intro Duration',
+              valueText: '${camera.introDurationMs} ms',
+              slider: _buildSidebarSlider(
+                context,
+                value: camera.introDurationMs.toDouble(),
+                min: 80.0,
+                max: 600.0,
+                divisions: 26,
+                onChanged: onIntroDurationChanged,
+                onChangeEnd: onIntroDurationChangeEnd,
+                accentColor: accentColor,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSidebarTokens.sectionGap),
+          AppFormRow(
+            label: 'Outro',
+            control: PlatformDropdown<CameraOutroPreset>(
+              value: camera.outroPreset,
+              items: const [
+                PlatformMenuItem(value: CameraOutroPreset.none, label: 'None'),
+                PlatformMenuItem(value: CameraOutroPreset.fade, label: 'Fade'),
+                PlatformMenuItem(
+                  value: CameraOutroPreset.shrink,
+                  label: 'Shrink',
+                ),
+                PlatformMenuItem(
+                  value: CameraOutroPreset.slide,
+                  label: 'Slide',
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  onOutroPresetChanged(value);
+                }
+              },
+            ),
+          ),
+          if (camera.outroPreset != CameraOutroPreset.none) ...[
+            const SizedBox(height: AppSidebarTokens.sectionGap),
+            AppSliderRow(
+              label: 'Outro Duration',
+              valueText: '${camera.outroDurationMs} ms',
+              slider: _buildSidebarSlider(
+                context,
+                value: camera.outroDurationMs.toDouble(),
+                min: 80.0,
+                max: 600.0,
+                divisions: 26,
+                onChanged: onOutroDurationChanged,
+                onChangeEnd: onOutroDurationChangeEnd,
+                accentColor: accentColor,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSidebarTokens.sectionGap),
+          AppFormRow(
+            label: 'Zoom Emphasis',
+            control: PlatformDropdown<CameraZoomEmphasisPreset>(
+              value: camera.zoomEmphasisPreset,
+              items: const [
+                PlatformMenuItem(
+                  value: CameraZoomEmphasisPreset.none,
+                  label: 'None',
+                ),
+                PlatformMenuItem(
+                  value: CameraZoomEmphasisPreset.pulse,
+                  label: 'Pulse',
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  onZoomEmphasisPresetChanged(value);
+                }
+              },
+            ),
+          ),
+          if (camera.zoomEmphasisPreset == CameraZoomEmphasisPreset.pulse) ...[
+            const SizedBox(height: AppSidebarTokens.sectionGap),
+            AppSliderRow(
+              label: 'Pulse Strength',
+              valueText: '${(camera.zoomEmphasisStrength * 100).round()}%',
+              slider: _buildSidebarSlider(
+                context,
+                value: camera.zoomEmphasisStrength,
+                min: 0.0,
+                max: 0.2,
+                divisions: 20,
+                onChanged: onZoomEmphasisStrengthChanged,
+                onChangeEnd: onZoomEmphasisStrengthChangeEnd,
                 accentColor: accentColor,
               ),
             ),

@@ -145,6 +145,15 @@ class PostProcessingSidebar extends StatelessWidget {
   final Function(CameraZoomBehavior) onCameraZoomBehaviorChanged;
   final Function(double) onCameraZoomScaleMultiplierChanged;
   final Function(double) onCameraZoomScaleMultiplierChangeEnd;
+  final Function(CameraIntroPreset) onCameraIntroPresetChanged;
+  final Function(CameraOutroPreset) onCameraOutroPresetChanged;
+  final Function(CameraZoomEmphasisPreset) onCameraZoomEmphasisPresetChanged;
+  final Function(double) onCameraIntroDurationChanged;
+  final Function(double) onCameraIntroDurationChangeEnd;
+  final Function(double) onCameraOutroDurationChanged;
+  final Function(double) onCameraOutroDurationChangeEnd;
+  final Function(double) onCameraZoomEmphasisStrengthChanged;
+  final Function(double) onCameraZoomEmphasisStrengthChangeEnd;
   final Function(double) onCameraManualCenterXChanged;
   final Function(double) onCameraManualCenterXChangeEnd;
   final Function(double) onCameraManualCenterYChanged;
@@ -203,6 +212,15 @@ class PostProcessingSidebar extends StatelessWidget {
     required this.onCameraZoomBehaviorChanged,
     required this.onCameraZoomScaleMultiplierChanged,
     required this.onCameraZoomScaleMultiplierChangeEnd,
+    required this.onCameraIntroPresetChanged,
+    required this.onCameraOutroPresetChanged,
+    required this.onCameraZoomEmphasisPresetChanged,
+    required this.onCameraIntroDurationChanged,
+    required this.onCameraIntroDurationChangeEnd,
+    required this.onCameraOutroDurationChanged,
+    required this.onCameraOutroDurationChangeEnd,
+    required this.onCameraZoomEmphasisStrengthChanged,
+    required this.onCameraZoomEmphasisStrengthChangeEnd,
     required this.onCameraManualCenterXChanged,
     required this.onCameraManualCenterXChangeEnd,
     required this.onCameraManualCenterYChanged,
@@ -304,6 +322,15 @@ class PostProcessingSidebar extends StatelessWidget {
         onZoomBehaviorChanged: onCameraZoomBehaviorChanged,
         onZoomScaleMultiplierChanged: onCameraZoomScaleMultiplierChanged,
         onZoomScaleMultiplierChangeEnd: onCameraZoomScaleMultiplierChangeEnd,
+        onIntroPresetChanged: onCameraIntroPresetChanged,
+        onOutroPresetChanged: onCameraOutroPresetChanged,
+        onZoomEmphasisPresetChanged: onCameraZoomEmphasisPresetChanged,
+        onIntroDurationChanged: onCameraIntroDurationChanged,
+        onIntroDurationChangeEnd: onCameraIntroDurationChangeEnd,
+        onOutroDurationChanged: onCameraOutroDurationChanged,
+        onOutroDurationChangeEnd: onCameraOutroDurationChangeEnd,
+        onZoomEmphasisStrengthChanged: onCameraZoomEmphasisStrengthChanged,
+        onZoomEmphasisStrengthChangeEnd: onCameraZoomEmphasisStrengthChangeEnd,
         onManualCenterXChanged: onCameraManualCenterXChanged,
         onManualCenterXChangeEnd: onCameraManualCenterXChangeEnd,
         onManualCenterYChanged: onCameraManualCenterYChanged,
