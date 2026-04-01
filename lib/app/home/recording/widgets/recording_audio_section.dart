@@ -14,6 +14,7 @@ import 'package:flutter/material.dart' hide PlatformMenuItem;
 const _micInputMeterKey = Key('mic_input_meter');
 const _micInputMeterTooltipKey = Key('mic_input_meter_tooltip');
 const _micInputMeterFillKey = Key('mic_input_meter_fill');
+const _micInputMeterFillOpacityKey = Key('mic_input_meter_fill_opacity');
 const _micInputMeterOutlineKey = Key('mic_input_meter_outline');
 
 class RecordingAudioSection extends StatelessWidget {
@@ -200,6 +201,14 @@ class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
     return math.pow(linear, 0.5).toDouble().clamp(0.0, 1.0);
   }
 
+  double _fillOpacityFor(double visualLevel) {
+    if (!widget.hasSelectedMicrophone || visualLevel <= 0.0) {
+      return 0.0;
+    }
+
+    return (0.22 + (visualLevel * 0.78)).clamp(0.0, 1.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -237,6 +246,8 @@ class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
               duration: _animationDuration,
               curve: Curves.easeOutCubic,
               builder: (context, animatedLevel, _) {
+                final clampedLevel = animatedLevel.clamp(0.0, 1.0);
+                final fillOpacity = _fillOpacityFor(clampedLevel);
                 return SizedBox.square(
                   dimension: 18,
                   child: Stack(
@@ -268,12 +279,16 @@ class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
                               key: _micInputMeterFillKey,
                               alignment: Alignment.bottomCenter,
                               heightFactor: widget.hasSelectedMicrophone
-                                  ? animatedLevel.clamp(0.0, 1.0)
+                                  ? clampedLevel
                                   : 0.0,
-                              child: Container(
-                                width: _meterWidth,
-                                height: _meterHeight,
-                                color: _MicInputMeterIcon._activeFillColor,
+                              child: Opacity(
+                                key: _micInputMeterFillOpacityKey,
+                                opacity: fillOpacity,
+                                child: Container(
+                                  width: _meterWidth,
+                                  height: _meterHeight,
+                                  color: _MicInputMeterIcon._activeFillColor,
+                                ),
                               ),
                             ),
                           ),

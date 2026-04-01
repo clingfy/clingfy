@@ -92,8 +92,20 @@ double _expectedVisualLevel(double linear) {
   return math.pow(linear, 0.5).toDouble().clamp(0.0, 1.0);
 }
 
+double _expectedFillOpacity(double linear) {
+  final visualLevel = _expectedVisualLevel(linear);
+  if (visualLevel <= 0.0) return 0.0;
+  return (0.22 + (visualLevel * 0.78)).clamp(0.0, 1.0);
+}
+
 Align _meterFill(WidgetTester tester) {
   return tester.widget<Align>(find.byKey(const Key('mic_input_meter_fill')));
+}
+
+Opacity _meterFillOpacity(WidgetTester tester) {
+  return tester.widget<Opacity>(
+    find.byKey(const Key('mic_input_meter_fill_opacity')),
+  );
 }
 
 Icon _meterOutline(WidgetTester tester) {
@@ -138,6 +150,7 @@ void main() {
       _meterTooltip(tester).message,
       l10n.micInputIndicatorDisabledTooltip,
     );
+    expect(_meterFillOpacity(tester).opacity, 0.0);
   });
 
   testWidgets('selected mic shows an active meter and live level tooltip', (
@@ -165,6 +178,10 @@ void main() {
       _meterTooltip(tester).message,
       l10n.micInputIndicatorLiveTooltip('-23.1'),
     );
+    expect(
+      _meterFillOpacity(tester).opacity,
+      closeTo(_expectedFillOpacity(0.42), 0.001),
+    );
   });
 
   testWidgets('meter fill uses a more sensitive response curve', (
@@ -182,6 +199,46 @@ void main() {
       closeTo(_expectedVisualLevel(0.08), 0.001),
     );
     expect(_meterFill(tester).heightFactor!, greaterThan(0.08));
+  });
+
+  testWidgets('meter fill opacity increases with audio input level', (
+    tester,
+  ) async {
+    await _pumpSection(
+      tester,
+      selectedAudioSourceId: 'mic-1',
+      micInputLevelLinear: 0.10,
+      micInputLevelDbfs: -40.0,
+    );
+    final quietOpacity = _meterFillOpacity(tester).opacity;
+
+    await tester.pumpWidget(
+      _buildSection(
+        selectedAudioSourceId: 'mic-1',
+        micInputLevelLinear: 0.46,
+        micInputLevelDbfs: -18.0,
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    final mediumOpacity = _meterFillOpacity(tester).opacity;
+
+    await tester.pumpWidget(
+      _buildSection(
+        selectedAudioSourceId: 'mic-1',
+        micInputLevelLinear: 0.84,
+        micInputLevelDbfs: -6.0,
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    final loudOpacity = _meterFillOpacity(tester).opacity;
+
+    expect(quietOpacity, closeTo(_expectedFillOpacity(0.10), 0.001));
+    expect(mediumOpacity, closeTo(_expectedFillOpacity(0.46), 0.001));
+    expect(loudOpacity, closeTo(_expectedFillOpacity(0.84), 0.001));
+    expect(quietOpacity, lessThan(mediumOpacity));
+    expect(mediumOpacity, lessThan(loudOpacity));
   });
 
   testWidgets('meter fill animates to the latest audio level', (tester) async {
@@ -210,6 +267,10 @@ void main() {
     expect(
       _meterFill(tester).heightFactor,
       closeTo(_expectedVisualLevel(0.76), 0.001),
+    );
+    expect(
+      _meterFillOpacity(tester).opacity,
+      closeTo(_expectedFillOpacity(0.76), 0.001),
     );
   });
 
@@ -242,6 +303,10 @@ void main() {
       _meterFill(tester).heightFactor,
       closeTo(_expectedVisualLevel(0.16), 0.001),
     );
+    expect(
+      _meterFillOpacity(tester).opacity,
+      closeTo(_expectedFillOpacity(0.16), 0.001),
+    );
   });
 
   testWidgets('meter fill fades to empty when audio input reaches silence', (
@@ -270,6 +335,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_meterFill(tester).heightFactor, 0.0);
+    expect(_meterFillOpacity(tester).opacity, 0.0);
   });
 
   testWidgets('meter still updates while recording is active', (tester) async {
@@ -300,6 +366,10 @@ void main() {
     expect(
       _meterFill(tester).heightFactor,
       closeTo(_expectedVisualLevel(0.52), 0.001),
+    );
+    expect(
+      _meterFillOpacity(tester).opacity,
+      closeTo(_expectedFillOpacity(0.52), 0.001),
     );
   });
 
