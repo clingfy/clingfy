@@ -70,19 +70,19 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
     final textStyle = theme.appTypography.body;
     final palette = _DropdownPalette.resolve(theme);
     final height = isMac() ? widget.heightMac : widget.heightWin;
-
     return LayoutBuilder(
       builder: (context, constraints) {
-        final available = constraints.maxWidth.isFinite
+        final availableWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : (widget.maxWidth.isFinite
                   ? widget.maxWidth
                   : AppSidebarTokens.controlMaxWidth);
-        final effectiveMax = widget.maxWidth.isFinite
-            ? math.min(widget.maxWidth, available)
-            : available;
-        final effectiveMin = math.min(widget.minWidth, effectiveMax);
-        final fieldWidth = effectiveMax;
+
+        final clampedWidth = widget.maxWidth.isFinite
+            ? math.min(widget.maxWidth, availableWidth)
+            : availableWidth;
+
+        final fieldWidth = widget.expand ? availableWidth : clampedWidth;
         final labelWidth = math.max(0.0, fieldWidth - 48);
 
         final popupTheme = theme.copyWith(
@@ -92,6 +92,7 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
         );
 
         final dropdown = SizedBox(
+          width: fieldWidth,
           height: height,
           child: Theme(
             data: popupTheme,
@@ -104,6 +105,7 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
               surfaceTintColor: Colors.transparent,
               shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.22),
               elevation: 10,
+              constraints: BoxConstraints.tightFor(width: fieldWidth),
               onOpened: () {
                 if (!mounted) return;
                 setState(() {
@@ -116,7 +118,6 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
                   _isMenuOpen = false;
                 });
               },
-              constraints: BoxConstraints.tightFor(width: fieldWidth),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(color: palette.border),
@@ -172,7 +173,6 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
                   isOpen: _isMenuOpen,
                   palette: palette,
                   textStyle: textStyle,
-                  fieldWidth: fieldWidth,
                   buttonLabelWidth: labelWidth,
                 ),
               ),
@@ -199,7 +199,6 @@ class _DropdownField extends StatelessWidget {
     required this.isOpen,
     required this.palette,
     required this.textStyle,
-    required this.fieldWidth,
     required this.buttonLabelWidth,
   });
 
@@ -209,7 +208,6 @@ class _DropdownField extends StatelessWidget {
   final bool isOpen;
   final _DropdownPalette palette;
   final TextStyle textStyle;
-  final double fieldWidth;
   final double buttonLabelWidth;
 
   @override

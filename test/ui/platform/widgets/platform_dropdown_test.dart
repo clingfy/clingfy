@@ -11,6 +11,7 @@ void main() {
     String? value = 'project',
     ValueChanged<String?>? onChanged,
     double width = 220,
+    double maxWidth = 360,
     List<app.PlatformMenuItem<String>>? items,
   }) {
     return MaterialApp(
@@ -24,6 +25,7 @@ void main() {
             child: app.PlatformDropdown<String>(
               value: value,
               onChanged: onChanged ?? (_) {},
+              maxWidth: maxWidth,
               items:
                   items ??
                   const [
@@ -185,6 +187,27 @@ void main() {
 
     expect(dropdownMenuRowWidth(tester, 0), moreOrLessEquals(100));
   });
+
+  testWidgets(
+    'opened menu matches the full rendered field width when max width is unbounded',
+    (tester) async {
+      await tester.pumpWidget(
+        buildDropdownApp(
+          themeMode: ThemeMode.dark,
+          width: 420,
+          maxWidth: double.infinity,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(dropdownFieldWidth(tester), moreOrLessEquals(420));
+
+      await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
+      await tester.pumpAndSettle();
+
+      expect(dropdownMenuRowWidth(tester, 0), moreOrLessEquals(420));
+    },
+  );
 
   testWidgets('field and menu width respect the shared max-width cap', (
     tester,

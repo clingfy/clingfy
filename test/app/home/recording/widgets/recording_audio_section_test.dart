@@ -1,6 +1,7 @@
 import 'package:clingfy/app/home/recording/widgets/recording_audio_section.dart';
 import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
+import 'package:clingfy/ui/platform/widgets/platform_dropdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:macos_ui/macos_ui.dart';
@@ -148,6 +149,21 @@ Tooltip _meterTooltip(WidgetTester tester) {
   );
 }
 
+double _audioDropdownFieldWidth(WidgetTester tester) {
+  final field = find.descendant(
+    of: find.byWidgetPredicate((widget) => widget is PlatformDropdown<String>),
+    matching: find.byKey(PlatformDropdown.fieldKey),
+  );
+
+  return tester.getSize(field).width;
+}
+
+double _audioDropdownMenuRowWidth(WidgetTester tester, int index) {
+  return tester
+      .getSize(find.byKey(ValueKey('platform_dropdown_menu_row_$index')))
+      .width;
+}
+
 void main() {
   testWidgets('replaces the old monitor panel with a compact mic indicator', (
     tester,
@@ -231,6 +247,27 @@ void main() {
     );
     expect(_meterFillLevel(tester), greaterThan(0.30));
   });
+
+  testWidgets(
+    'audio source popup matches the rendered full-width dropdown field',
+    (tester) async {
+      await _pumpSection(tester, selectedAudioSourceId: 'mic-1');
+
+      final fieldWidth = _audioDropdownFieldWidth(tester);
+
+      await tester.tap(find.byKey(PlatformDropdown.fieldKey));
+      await tester.pumpAndSettle();
+
+      expect(
+        _audioDropdownMenuRowWidth(tester, 0),
+        moreOrLessEquals(fieldWidth),
+      );
+      expect(
+        _audioDropdownMenuRowWidth(tester, 1),
+        moreOrLessEquals(fieldWidth),
+      );
+    },
+  );
 
   testWidgets('meter fill increases with stronger dBFS levels', (tester) async {
     await _pumpSection(
