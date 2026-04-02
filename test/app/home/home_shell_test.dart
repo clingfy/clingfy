@@ -245,7 +245,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        tester.getRect(find.byKey(const Key('home_left_sidebar_shell'))).width,
+        _railWidth(tester),
         moreOrLessEquals(HomeDesktopPaneDimensions.compactRailWidth),
       );
       expect(find.byKey(const Key('home_options_panel_shell')), findsOneWidget);
@@ -469,7 +469,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        tester.getRect(find.byKey(const Key('home_left_sidebar_shell'))).width,
+        _railWidth(tester),
         moreOrLessEquals(HomeDesktopPaneDimensions.compactRailWidth),
       );
       expect(
@@ -481,10 +481,20 @@ void main() {
       );
 
       await tester.tap(find.byKey(const Key('home_sidebar_collapse_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+
+      final midExpandRailWidth = _railWidth(tester);
+      expect(
+        midExpandRailWidth,
+        greaterThan(HomeDesktopPaneDimensions.compactRailWidth),
+      );
+      expect(midExpandRailWidth, lessThan(HomeDesktopPaneDimensions.railWidth));
+
       await tester.pumpAndSettle();
 
       final railRect = tester.getRect(
-        find.byKey(const Key('home_left_sidebar_shell')),
+        find.byKey(const ValueKey('desktop_pane_slot_homeLeftSidebar')),
       );
       expect(
         railRect.width,
@@ -499,10 +509,23 @@ void main() {
       );
 
       await tester.tap(find.byKey(const Key('home_sidebar_collapse_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+
+      final midCollapseRailWidth = _railWidth(tester);
+      expect(
+        midCollapseRailWidth,
+        greaterThan(HomeDesktopPaneDimensions.compactRailWidth),
+      );
+      expect(
+        midCollapseRailWidth,
+        lessThan(HomeDesktopPaneDimensions.railWidth),
+      );
+
       await tester.pumpAndSettle();
 
       expect(
-        tester.getRect(find.byKey(const Key('home_left_sidebar_shell'))).width,
+        _railWidth(tester),
         moreOrLessEquals(HomeDesktopPaneDimensions.compactRailWidth),
       );
       expect(
@@ -571,7 +594,7 @@ void main() {
       );
 
       final railRect = tester.getRect(
-        find.byKey(const Key('home_left_sidebar_shell')),
+        find.byKey(const ValueKey('desktop_pane_slot_homeLeftSidebar')),
       );
       final toolbarRect = tester.getRect(
         find.byKey(const Key('desktop_toolbar_surface')),
@@ -759,18 +782,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final railRect = tester.getRect(
-        find.byKey(const Key('home_left_sidebar_shell')),
-      );
-      final optionsRect = tester.getRect(
-        find.byKey(const Key('home_options_panel_shell')),
-      );
-
       expect(
-        railRect.width,
+        _railWidth(tester),
         moreOrLessEquals(HomeDesktopPaneDimensions.compactRailWidth),
       );
-      expect(optionsRect.width, moreOrLessEquals(320));
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(320));
       expect(
         find.descendant(
           of: find.byKey(const Key('home_left_sidebar_shell')),
@@ -833,9 +849,14 @@ void main() {
       await tester.tap(
         find.byKey(const Key('home_toolbar_options_toggle_button')),
       );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+
+      expect(tester.takeException(), isNull);
+
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('home_options_panel_shell')), findsNothing);
+      expect(find.byKey(const Key('home_options_panel_shell')), findsOneWidget);
       expect(
         find.byKey(const Key('home_toolbar_options_toggle_button')),
         findsOneWidget,
@@ -850,6 +871,7 @@ void main() {
             .isCollapsed,
         isTrue,
       );
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(0));
       expect(
         tester.getRect(find.byKey(const Key('home_right_panel_shell'))).left,
         moreOrLessEquals(
@@ -860,18 +882,20 @@ void main() {
       await tester.tap(
         find.byKey(const Key('home_toolbar_options_toggle_button')),
       );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+
+      expect(tester.takeException(), isNull);
+
       await tester.pumpAndSettle();
 
-      final optionsRect = tester.getRect(
-        find.byKey(const Key('home_options_panel_shell')),
-      );
       expect(
         harness.uiState
             .paneStateFor(DesktopPaneId.recordingSidebar)
             .isCollapsed,
         isFalse,
       );
-      expect(optionsRect.width, moreOrLessEquals(356));
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(356));
       expect(
         find.byKey(const Key('home_options_panel_reveal_handle')),
         findsNothing,
@@ -933,7 +957,8 @@ void main() {
         railRect.width,
         moreOrLessEquals(HomeDesktopPaneDimensions.railWidth),
       );
-      expect(find.byKey(const Key('home_options_panel_shell')), findsNothing);
+      expect(find.byKey(const Key('home_options_panel_shell')), findsOneWidget);
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(0));
       expect(
         find.byKey(const Key('home_options_panel_reveal_handle')),
         findsNothing,
@@ -1002,15 +1027,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(
-        tester.getRect(find.byKey(const Key('home_options_panel_shell'))).width,
-        moreOrLessEquals(320),
-      );
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(320));
 
       final sessionId = await _openPreviewShell(harness.recording);
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('home_options_panel_shell')), findsNothing);
+      expect(find.byKey(const Key('home_options_panel_shell')), findsOneWidget);
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(0));
       expect(
         find.byKey(const Key('home_options_panel_reveal_handle')),
         findsNothing,
@@ -1021,18 +1044,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(
-        tester.getRect(find.byKey(const Key('home_options_panel_shell'))).width,
-        moreOrLessEquals(388),
-      );
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(388));
 
       await _closePreviewShell(harness.recording, sessionId);
       await tester.pumpAndSettle();
 
-      expect(
-        tester.getRect(find.byKey(const Key('home_options_panel_shell'))).width,
-        moreOrLessEquals(320),
-      );
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(320));
     },
   );
 
@@ -1079,7 +1096,8 @@ void main() {
         find.byKey(const Key('desktop_split_layout_scroll_view')),
         findsWidgets,
       );
-      expect(find.byKey(const Key('home_options_panel_shell')), findsNothing);
+      expect(find.byKey(const Key('home_options_panel_shell')), findsOneWidget);
+      expect(_optionsPanelWidth(tester), moreOrLessEquals(0));
       expect(
         find.byKey(const Key('home_options_panel_reveal_handle')),
         findsNothing,
@@ -1126,7 +1144,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('home_options_panel_shell')), findsNothing);
+    expect(find.byKey(const Key('home_options_panel_shell')), findsOneWidget);
+    expect(_optionsPanelWidth(tester), moreOrLessEquals(0));
 
     await tester.tap(
       find.byKey(const ValueKey('recording_sidebar_rail_tile_1')),
@@ -1259,6 +1278,26 @@ void _setDesktopWindow(
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
   });
+}
+
+double _optionsPanelWidth(WidgetTester tester) {
+  final recordingSlot = find.byKey(
+    const ValueKey('desktop_pane_slot_recordingSidebar'),
+  );
+  if (recordingSlot.evaluate().isNotEmpty) {
+    return tester.getRect(recordingSlot).width;
+  }
+
+  final postProcessingSlot = find.byKey(
+    const ValueKey('desktop_pane_slot_postProcessingSidebar'),
+  );
+  return tester.getRect(postProcessingSlot).width;
+}
+
+double _railWidth(WidgetTester tester) {
+  return tester
+      .getRect(find.byKey(const ValueKey('desktop_pane_slot_homeLeftSidebar')))
+      .width;
 }
 
 BoxDecoration _decorationFor(WidgetTester tester, Finder finder) {

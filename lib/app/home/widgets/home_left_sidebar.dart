@@ -34,7 +34,6 @@ class HomeLeftSidebar extends StatelessWidget {
   final VoidCallback onToggleRailMode;
 
   static const _sidebarLogoAsset = 'assets/icons/app-logo-512.png';
-
   @override
   Widget build(BuildContext context) {
     final tokens = context.appTokens;

@@ -45,6 +45,7 @@ const DesktopPaneSpec _recordingInspectorPaneSpec = DesktopPaneSpec(
   collapsedWidth: HomeDesktopPaneDimensions.inspectorCollapsed,
   resizable: true,
   collapsible: true,
+  snapCollapseAtMinWidthOnDragEnd: true,
   autoCollapsePriority: 1,
 );
 
@@ -56,6 +57,7 @@ const DesktopPaneSpec _postProcessingInspectorPaneSpec = DesktopPaneSpec(
   collapsedWidth: HomeDesktopPaneDimensions.inspectorCollapsed,
   resizable: true,
   collapsible: true,
+  snapCollapseAtMinWidthOnDragEnd: true,
   autoCollapsePriority: 1,
 );
 
