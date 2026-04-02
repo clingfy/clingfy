@@ -482,7 +482,7 @@ class _CameraPositionPanelState extends State<_CameraPositionPanel> {
     return ConstrainedBox(
       constraints: const BoxConstraints(
         minWidth: AppSidebarTokens.controlMinWidth,
-        maxWidth: AppSidebarTokens.controlMaxWidth,
+        // maxWidth: AppSidebarTokens.controlMaxWidth,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

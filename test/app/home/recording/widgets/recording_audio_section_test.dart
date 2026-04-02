@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:clingfy/app/home/recording/widgets/recording_audio_section.dart';
 import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
@@ -9,6 +7,7 @@ import 'package:macos_ui/macos_ui.dart';
 
 Widget _buildSection({
   required String selectedAudioSourceId,
+  Brightness brightness = Brightness.light,
   bool isRecording = false,
   bool loadingAudio = false,
   bool systemAudioEnabled = false,
@@ -18,10 +17,13 @@ Widget _buildSection({
   bool micInputTooLow = false,
 }) {
   return MaterialApp(
+    theme: ThemeData(brightness: brightness, useMaterial3: true),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     home: MacosTheme(
-      data: MacosThemeData.light(),
+      data: brightness == Brightness.dark
+          ? MacosThemeData.dark()
+          : MacosThemeData.light(),
       child: Scaffold(
         body: Center(
           child: SizedBox(
@@ -53,6 +55,7 @@ Widget _buildSection({
 Future<void> _pumpSection(
   WidgetTester tester, {
   required String selectedAudioSourceId,
+  Brightness brightness = Brightness.light,
   bool isRecording = false,
   bool loadingAudio = false,
   bool systemAudioEnabled = false,
@@ -64,6 +67,7 @@ Future<void> _pumpSection(
   await tester.pumpWidget(
     _buildSection(
       selectedAudioSourceId: selectedAudioSourceId,
+      brightness: brightness,
       isRecording: isRecording,
       loadingAudio: loadingAudio,
       systemAudioEnabled: systemAudioEnabled,
@@ -87,29 +91,55 @@ ThemeData _theme(WidgetTester tester) {
   return Theme.of(tester.element(find.byType(RecordingAudioSection)));
 }
 
-double _expectedVisualLevel(double linear) {
-  if (linear <= 0) return 0.0;
-  return math.pow(linear, 0.5).toDouble().clamp(0.0, 1.0);
+double _expectedVisualLevel(double dbfs) {
+  if (dbfs.isFinite) {
+    final clampedDbfs = dbfs.clamp(-60.0, 0.0).toDouble();
+    final normalized = ((clampedDbfs + 60.0) / 60.0).clamp(0.0, 1.0).toDouble();
+    if (normalized <= 0.0) {
+      return 0.0;
+    }
+    return Curves.easeOutCubic.transform(normalized);
+  }
+
+  return 0.0;
 }
 
-double _expectedFillOpacity(double linear) {
-  final visualLevel = _expectedVisualLevel(linear);
-  if (visualLevel <= 0.0) return 0.0;
-  return (0.22 + (visualLevel * 0.78)).clamp(0.0, 1.0);
-}
-
-Align _meterFill(WidgetTester tester) {
-  return tester.widget<Align>(find.byKey(const Key('mic_input_meter_fill')));
-}
-
-Opacity _meterFillOpacity(WidgetTester tester) {
-  return tester.widget<Opacity>(
-    find.byKey(const Key('mic_input_meter_fill_opacity')),
+Color _expectedBaseGlyphColor(
+  ThemeData theme, {
+  required bool hasSelectedMicrophone,
+}) {
+  final isDark = theme.brightness == Brightness.dark;
+  return theme.colorScheme.onSurfaceVariant.withValues(
+    alpha: hasSelectedMicrophone
+        ? (isDark ? 0.26 : 0.18)
+        : (isDark ? 0.22 : 0.14),
   );
 }
 
-Icon _meterOutline(WidgetTester tester) {
-  return tester.widget<Icon>(find.byKey(const Key('mic_input_meter_outline')));
+Color _expectedActiveFillColor(Brightness brightness) {
+  return brightness == Brightness.dark
+      ? const Color(0xFF30D158)
+      : const Color(0xFF34C759);
+}
+
+dynamic _meterFill(WidgetTester tester) {
+  return tester.widget(find.byKey(const Key('mic_input_meter_fill')));
+}
+
+double _meterFillLevel(WidgetTester tester) {
+  return _meterFill(tester).level as double;
+}
+
+Color _meterFillColor(WidgetTester tester) {
+  return _meterFill(tester).color as Color;
+}
+
+double _meterFillIconSize(WidgetTester tester) {
+  return _meterFill(tester).iconSize as double;
+}
+
+Icon _meterIcon(WidgetTester tester) {
+  return tester.widget<Icon>(find.byKey(const Key('mic_input_meter_icon')));
 }
 
 Tooltip _meterTooltip(WidgetTester tester) {
@@ -119,7 +149,7 @@ Tooltip _meterTooltip(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets('replaces the old monitor panel with a trailing mic meter', (
+  testWidgets('replaces the old monitor panel with a compact mic indicator', (
     tester,
   ) async {
     await _pumpSection(tester, selectedAudioSourceId: '__none__');
@@ -141,16 +171,18 @@ void main() {
     final theme = _theme(tester);
     final l10n = _l10n(tester);
 
+    expect(_meterIcon(tester).icon, Icons.mic_rounded);
+    expect(_meterIcon(tester).size, 18.0);
     expect(
-      _meterOutline(tester).color,
-      theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.62),
+      _meterIcon(tester).color,
+      _expectedBaseGlyphColor(theme, hasSelectedMicrophone: false),
     );
-    expect(_meterFill(tester).heightFactor, 0.0);
+    expect(find.byKey(const Key('mic_input_meter_fill')), findsNothing);
     expect(
       _meterTooltip(tester).message,
       l10n.micInputIndicatorDisabledTooltip,
     );
-    expect(_meterFillOpacity(tester).opacity, 0.0);
+    expect(_meterTooltip(tester).excludeFromSemantics, isTrue);
   });
 
   testWidgets('selected mic shows an active meter and live level tooltip', (
@@ -166,27 +198,26 @@ void main() {
     final theme = _theme(tester);
     final l10n = _l10n(tester);
 
+    expect(_meterIcon(tester).icon, Icons.mic_rounded);
+    expect(_meterIcon(tester).size, 18.0);
     expect(
-      _meterOutline(tester).color,
-      theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.86),
+      _meterIcon(tester).color,
+      _expectedBaseGlyphColor(theme, hasSelectedMicrophone: true),
     );
+    expect(find.byKey(const Key('mic_input_meter_fill')), findsOneWidget);
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.42), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-23.1), 0.001),
     );
+    expect(_meterFillColor(tester), _expectedActiveFillColor(theme.brightness));
+    expect(_meterFillIconSize(tester), 18.0);
     expect(
       _meterTooltip(tester).message,
       l10n.micInputIndicatorLiveTooltip('-23.1'),
     );
-    expect(
-      _meterFillOpacity(tester).opacity,
-      closeTo(_expectedFillOpacity(0.42), 0.001),
-    );
   });
 
-  testWidgets('meter fill uses a more sensitive response curve', (
-    tester,
-  ) async {
+  testWidgets('meter fill uses eased dBFS normalization', (tester) async {
     await _pumpSection(
       tester,
       selectedAudioSourceId: 'mic-1',
@@ -195,22 +226,20 @@ void main() {
     );
 
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.08), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-42.0), 0.001),
     );
-    expect(_meterFill(tester).heightFactor!, greaterThan(0.08));
+    expect(_meterFillLevel(tester), greaterThan(0.30));
   });
 
-  testWidgets('meter fill opacity increases with audio input level', (
-    tester,
-  ) async {
+  testWidgets('meter fill increases with stronger dBFS levels', (tester) async {
     await _pumpSection(
       tester,
       selectedAudioSourceId: 'mic-1',
       micInputLevelLinear: 0.10,
       micInputLevelDbfs: -40.0,
     );
-    final quietOpacity = _meterFillOpacity(tester).opacity;
+    final quietLevel = _meterFillLevel(tester);
 
     await tester.pumpWidget(
       _buildSection(
@@ -221,7 +250,7 @@ void main() {
     );
     await tester.pump();
     await tester.pumpAndSettle();
-    final mediumOpacity = _meterFillOpacity(tester).opacity;
+    final mediumLevel = _meterFillLevel(tester);
 
     await tester.pumpWidget(
       _buildSection(
@@ -232,13 +261,13 @@ void main() {
     );
     await tester.pump();
     await tester.pumpAndSettle();
-    final loudOpacity = _meterFillOpacity(tester).opacity;
+    final loudLevel = _meterFillLevel(tester);
 
-    expect(quietOpacity, closeTo(_expectedFillOpacity(0.10), 0.001));
-    expect(mediumOpacity, closeTo(_expectedFillOpacity(0.46), 0.001));
-    expect(loudOpacity, closeTo(_expectedFillOpacity(0.84), 0.001));
-    expect(quietOpacity, lessThan(mediumOpacity));
-    expect(mediumOpacity, lessThan(loudOpacity));
+    expect(quietLevel, closeTo(_expectedVisualLevel(-40.0), 0.001));
+    expect(mediumLevel, closeTo(_expectedVisualLevel(-18.0), 0.001));
+    expect(loudLevel, closeTo(_expectedVisualLevel(-6.0), 0.001));
+    expect(quietLevel, lessThan(mediumLevel));
+    expect(mediumLevel, lessThan(loudLevel));
   });
 
   testWidgets('meter fill animates to the latest audio level', (tester) async {
@@ -250,8 +279,8 @@ void main() {
     );
 
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.18), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-30.0), 0.001),
     );
 
     await tester.pumpWidget(
@@ -264,14 +293,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.76), 0.001),
-    );
-    expect(
-      _meterFillOpacity(tester).opacity,
-      closeTo(_expectedFillOpacity(0.76), 0.001),
-    );
+    expect(_meterFillLevel(tester), closeTo(_expectedVisualLevel(-8.4), 0.001));
   });
 
   testWidgets('meter fill decreases when audio input decreases', (
@@ -284,10 +306,7 @@ void main() {
       micInputLevelDbfs: -9.0,
     );
 
-    expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.72), 0.001),
-    );
+    expect(_meterFillLevel(tester), closeTo(_expectedVisualLevel(-9.0), 0.001));
 
     await tester.pumpWidget(
       _buildSection(
@@ -300,12 +319,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.16), 0.001),
-    );
-    expect(
-      _meterFillOpacity(tester).opacity,
-      closeTo(_expectedFillOpacity(0.16), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-33.0), 0.001),
     );
   });
 
@@ -320,8 +335,8 @@ void main() {
     );
 
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.36), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-20.0), 0.001),
     );
 
     await tester.pumpWidget(
@@ -334,8 +349,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(_meterFill(tester).heightFactor, 0.0);
-    expect(_meterFillOpacity(tester).opacity, 0.0);
+    expect(find.byKey(const Key('mic_input_meter_fill')), findsNothing);
   });
 
   testWidgets('meter still updates while recording is active', (tester) async {
@@ -348,8 +362,8 @@ void main() {
     );
 
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.14), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-35.0), 0.001),
     );
 
     await tester.pumpWidget(
@@ -364,33 +378,55 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.52), 0.001),
-    );
-    expect(
-      _meterFillOpacity(tester).opacity,
-      closeTo(_expectedFillOpacity(0.52), 0.001),
+      _meterFillLevel(tester),
+      closeTo(_expectedVisualLevel(-18.0), 0.001),
     );
   });
 
-  testWidgets('low input swaps the meter tooltip to the warning copy', (
-    tester,
-  ) async {
+  testWidgets(
+    'low input keeps the active fill green and changes tooltip only',
+    (tester) async {
+      await _pumpSection(
+        tester,
+        selectedAudioSourceId: 'mic-1',
+        micInputLevelLinear: 0.08,
+        micInputLevelDbfs: -45.2,
+        micInputTooLow: true,
+      );
+
+      final theme = _theme(tester);
+      final l10n = _l10n(tester);
+
+      expect(_meterTooltip(tester).message, l10n.micInputIndicatorLowTooltip);
+      expect(
+        _meterFillLevel(tester),
+        closeTo(_expectedVisualLevel(-45.2), 0.001),
+      );
+      expect(
+        _meterFillColor(tester),
+        _expectedActiveFillColor(theme.brightness),
+      );
+    },
+  );
+
+  testWidgets('active fill uses the dark-theme green accent', (tester) async {
     await _pumpSection(
       tester,
+      brightness: Brightness.dark,
       selectedAudioSourceId: 'mic-1',
-      micInputLevelLinear: 0.08,
-      micInputLevelDbfs: -45.2,
-      micInputTooLow: true,
+      micInputLevelLinear: 0.42,
+      micInputLevelDbfs: -23.1,
     );
 
-    final l10n = _l10n(tester);
+    final theme = _theme(tester);
 
-    expect(_meterTooltip(tester).message, l10n.micInputIndicatorLowTooltip);
+    expect(_meterIcon(tester).size, 18.0);
     expect(
-      _meterFill(tester).heightFactor,
-      closeTo(_expectedVisualLevel(0.08), 0.001),
+      _meterIcon(tester).color,
+      _expectedBaseGlyphColor(theme, hasSelectedMicrophone: true),
     );
+    expect(_meterFillColor(tester), const Color(0xFF30D158));
+    expect(_meterFillIconSize(tester), 18.0);
   });
 
   testWidgets('existing system audio rules still render correctly', (

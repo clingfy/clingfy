@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
 import 'package:clingfy/ui/platform/platform_kind.dart';
@@ -13,9 +11,8 @@ import 'package:flutter/material.dart' hide PlatformMenuItem;
 
 const _micInputMeterKey = Key('mic_input_meter');
 const _micInputMeterTooltipKey = Key('mic_input_meter_tooltip');
+const _micInputMeterIconKey = Key('mic_input_meter_icon');
 const _micInputMeterFillKey = Key('mic_input_meter_fill');
-const _micInputMeterFillOpacityKey = Key('mic_input_meter_fill_opacity');
-const _micInputMeterOutlineKey = Key('mic_input_meter_outline');
 
 class RecordingAudioSection extends StatelessWidget {
   const RecordingAudioSection({
@@ -150,8 +147,6 @@ class _MicInputMeterIcon extends StatefulWidget {
     required this.inputTooLow,
   });
 
-  static const Color _activeFillColor = Color(0xFF34C759);
-
   final bool hasSelectedMicrophone;
   final double levelLinear;
   final double levelDbfs;
@@ -164,9 +159,9 @@ class _MicInputMeterIcon extends StatefulWidget {
 class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
   static const Duration _attackDuration = Duration(milliseconds: 90);
   static const Duration _releaseDuration = Duration(milliseconds: 220);
-  static const double _meterWidth = 7.0;
-  static const double _meterHeight = 11.0;
-  static const double _meterTopOffset = 2.6;
+  static const double _minimumDisplayDbfs = -60.0;
+  static const double _iconSize = 18.0;
+  static const double _iconCanvasSize = 20.0;
 
   late double _animatedLevel;
   Duration _animationDuration = Duration.zero;
@@ -194,19 +189,36 @@ class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
   }
 
   double _visualLevelFor(_MicInputMeterIcon widget) {
-    final linear = widget.hasSelectedMicrophone
-        ? widget.levelLinear.clamp(0.0, 1.0)
-        : 0.0;
-    if (linear <= 0) return 0.0;
-    return math.pow(linear, 0.5).toDouble().clamp(0.0, 1.0);
-  }
-
-  double _fillOpacityFor(double visualLevel) {
-    if (!widget.hasSelectedMicrophone || visualLevel <= 0.0) {
+    if (!widget.hasSelectedMicrophone) {
       return 0.0;
     }
 
-    return (0.22 + (visualLevel * 0.78)).clamp(0.0, 1.0);
+    if (widget.levelDbfs.isFinite) {
+      final clampedDbfs = widget.levelDbfs
+          .clamp(_minimumDisplayDbfs, 0.0)
+          .toDouble();
+      final normalized =
+          ((clampedDbfs - _minimumDisplayDbfs) / -_minimumDisplayDbfs)
+              .clamp(0.0, 1.0)
+              .toDouble();
+
+      if (normalized <= 0.0) {
+        return 0.0;
+      }
+
+      return Curves.easeOutCubic.transform(normalized);
+    }
+
+    if (!widget.levelLinear.isFinite) {
+      return 0.0;
+    }
+
+    final fallbackLinear = widget.levelLinear.clamp(0.0, 1.0).toDouble();
+    if (fallbackLinear <= 0.0) {
+      return 0.0;
+    }
+
+    return Curves.easeOutCubic.transform(fallbackLinear);
   }
 
   @override
@@ -216,9 +228,11 @@ class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
       context: context,
       hasSelectedMicrophone: widget.hasSelectedMicrophone,
     );
+
     final controlSize = isMac()
         ? AppSidebarTokens.controlHeightMac
         : AppSidebarTokens.controlHeightDefault;
+
     final tooltipMessage = !widget.hasSelectedMicrophone
         ? l10n.micInputIndicatorDisabledTooltip
         : widget.inputTooLow
@@ -230,84 +244,127 @@ class _MicInputMeterIconState extends State<_MicInputMeterIcon> {
     return Tooltip(
       key: _micInputMeterTooltipKey,
       message: tooltipMessage,
-      child: SizedBox(
-        width: controlSize,
-        height: controlSize,
-        child: DecoratedBox(
-          key: _micInputMeterKey,
-          decoration: BoxDecoration(
-            color: visualState.chromeColor,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: visualState.borderColor),
-          ),
-          child: Center(
-            child: TweenAnimationBuilder<double>(
-              tween: Tween<double>(end: _animatedLevel),
-              duration: _animationDuration,
-              curve: Curves.easeOutCubic,
-              builder: (context, animatedLevel, _) {
-                final clampedLevel = animatedLevel.clamp(0.0, 1.0);
-                final fillOpacity = _fillOpacityFor(clampedLevel);
-                return SizedBox.square(
-                  dimension: 18,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      if (widget.hasSelectedMicrophone)
-                        Positioned(
-                          top: _meterTopOffset,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: _MicInputMeterIcon._activeFillColor
-                                  .withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: SizedBox(
-                              width: _meterWidth,
-                              height: _meterHeight,
-                            ),
-                          ),
-                        ),
-                      Positioned(
-                        top: _meterTopOffset,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: SizedBox(
-                            width: _meterWidth,
-                            height: _meterHeight,
-                            child: Align(
-                              key: _micInputMeterFillKey,
-                              alignment: Alignment.bottomCenter,
-                              heightFactor: widget.hasSelectedMicrophone
-                                  ? clampedLevel
-                                  : 0.0,
-                              child: Opacity(
-                                key: _micInputMeterFillOpacityKey,
-                                opacity: fillOpacity,
-                                child: Container(
-                                  width: _meterWidth,
-                                  height: _meterHeight,
-                                  color: _MicInputMeterIcon._activeFillColor,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        Icons.mic_none_rounded,
-                        key: _micInputMeterOutlineKey,
-                        size: 19,
-                        color: visualState.outlineColor,
-                      ),
-                    ],
-                  ),
-                );
-              },
+      excludeFromSemantics: true,
+      child: Semantics(
+        container: true,
+        label: tooltipMessage,
+        value: tooltipMessage,
+        child: SizedBox(
+          width: controlSize,
+          height: controlSize,
+          child: DecoratedBox(
+            key: _micInputMeterKey,
+            decoration: BoxDecoration(
+              color: visualState.chromeColor,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: visualState.borderColor),
+            ),
+            child: Center(
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: _animatedLevel),
+                duration: _animationDuration,
+                curve: Curves.easeOutCubic,
+                builder: (context, animatedLevel, _) {
+                  final clampedLevel = animatedLevel.clamp(0.0, 1.0).toDouble();
+
+                  return _MicFilledGlyph(
+                    iconSize: _iconSize,
+                    canvasSize: _iconCanvasSize,
+                    level: clampedLevel,
+                    baseColor: visualState.glyphTrackColor,
+                    fillColor: visualState.glyphFillColor,
+                    outlineColor: visualState.outlineColor,
+                  );
+                },
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _MicFilledGlyph extends StatelessWidget {
+  const _MicFilledGlyph({
+    required this.iconSize,
+    required this.canvasSize,
+    required this.level,
+    required this.baseColor,
+    required this.fillColor,
+    required this.outlineColor,
+  });
+
+  final double iconSize;
+  final double canvasSize;
+  final double level;
+  final Color baseColor;
+  final Color fillColor;
+  final Color outlineColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final clampedLevel = level.clamp(0.0, 1.0).toDouble();
+
+    return SizedBox.square(
+      dimension: canvasSize,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(
+            Icons.mic_rounded,
+            key: _micInputMeterIconKey,
+            size: iconSize,
+            color: baseColor,
+          ),
+          if (clampedLevel > 0.0)
+            _MicLiveFill(
+              key: _micInputMeterFillKey,
+              iconSize: iconSize,
+              level: clampedLevel,
+              color: fillColor,
+            ),
+          Icon(Icons.mic_none_rounded, size: iconSize, color: outlineColor),
+        ],
+      ),
+    );
+  }
+}
+
+class _MicLiveFill extends StatelessWidget {
+  const _MicLiveFill({
+    super.key,
+    required this.iconSize,
+    required this.level,
+    required this.color,
+  });
+
+  final double iconSize;
+  final double level;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final clampedLevel = level.clamp(0.0, 1.0).toDouble();
+
+    if (clampedLevel >= 0.999) {
+      return Icon(Icons.mic_rounded, size: iconSize, color: color);
+    }
+
+    final transitionStart = (clampedLevel - 0.001).clamp(0.0, 1.0).toDouble();
+    final transitionEnd = (clampedLevel + 0.001).clamp(0.0, 1.0).toDouble();
+
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (bounds) {
+        return LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [color, color, Colors.transparent, Colors.transparent],
+          stops: [0.0, transitionStart, transitionEnd, 1.0],
+        ).createShader(bounds);
+      },
+      child: Icon(Icons.mic_rounded, size: iconSize, color: Colors.white),
     );
   }
 }
@@ -317,17 +374,25 @@ class _MicInputMeterVisualState {
     required this.outlineColor,
     required this.chromeColor,
     required this.borderColor,
+    required this.glyphTrackColor,
+    required this.glyphFillColor,
   });
 
   final Color outlineColor;
   final Color chromeColor;
   final Color borderColor;
+  final Color glyphTrackColor;
+  final Color glyphFillColor;
 
   factory _MicInputMeterVisualState.fromContext({
     required BuildContext context,
     required bool hasSelectedMicrophone,
   }) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final activeFillColor = isDark
+        ? const Color(0xFF30D158)
+        : const Color(0xFF34C759);
 
     if (!hasSelectedMicrophone) {
       return _MicInputMeterVisualState(
@@ -338,15 +403,25 @@ class _MicInputMeterVisualState {
           alpha: 0.34,
         ),
         borderColor: theme.dividerColor.withValues(alpha: 0.14),
+        glyphTrackColor: theme.colorScheme.onSurfaceVariant.withValues(
+          alpha: isDark ? 0.22 : 0.14,
+        ),
+        glyphFillColor: theme.colorScheme.onSurfaceVariant.withValues(
+          alpha: isDark ? 0.22 : 0.16,
+        ),
       );
     }
 
     return _MicInputMeterVisualState(
-      outlineColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.86),
+      outlineColor: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.92),
       chromeColor: theme.colorScheme.surfaceContainerHighest.withValues(
         alpha: 0.48,
       ),
       borderColor: theme.dividerColor.withValues(alpha: 0.18),
+      glyphTrackColor: theme.colorScheme.onSurfaceVariant.withValues(
+        alpha: isDark ? 0.26 : 0.18,
+      ),
+      glyphFillColor: activeFillColor,
     );
   }
 }
