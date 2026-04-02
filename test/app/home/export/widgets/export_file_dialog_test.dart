@@ -92,4 +92,20 @@ void main() {
     expect(find.text('Cancel'), findsNothing);
     expect(find.text('Export'), findsOneWidget);
   });
+
+  testWidgets('fixed-width export format dropdown keeps its authored width', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildDialog());
+    await tester.pumpAndSettle();
+
+    final formatField = find.descendant(
+      of: find.byWidgetPredicate(
+        (widget) => widget is PlatformDropdown<ExportFormat>,
+      ),
+      matching: find.byKey(PlatformDropdown.fieldKey),
+    );
+
+    expect(tester.getSize(formatField).width, moreOrLessEquals(100));
+  });
 }

@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:clingfy/ui/platform/platform_kind.dart';
-import 'package:clingfy/ui/platform/widgets/app_control_box.dart';
 import 'package:clingfy/ui/platform/widgets/app_sidebar_tokens.dart';
 import 'package:clingfy/ui/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -21,7 +20,7 @@ class PlatformDropdown<T> extends StatefulWidget {
     this.labelText,
     this.minWidth = AppSidebarTokens.controlMinWidth,
     this.maxWidth = AppSidebarTokens.controlMaxWidth,
-    this.expand = false,
+    this.expand = true,
     this.heightMac = AppSidebarTokens.controlHeightMac,
     this.heightWin = AppSidebarTokens.controlHeightDefault,
   });
@@ -51,10 +50,6 @@ class PlatformDropdown<T> extends StatefulWidget {
 }
 
 class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
-  static const double _menuViewportPadding = 32;
-  static const double _menuMaxWidthCap = 480;
-  static const double _menuHorizontalChrome = 48;
-
   bool _isHoveringField = false;
   bool _isMenuOpen = false;
 
@@ -80,16 +75,15 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
       builder: (context, constraints) {
         final available = constraints.maxWidth.isFinite
             ? constraints.maxWidth
-            : widget.maxWidth;
-        final effectiveMax = math.min(widget.maxWidth, available);
+            : (widget.maxWidth.isFinite
+                  ? widget.maxWidth
+                  : AppSidebarTokens.controlMaxWidth);
+        final effectiveMax = widget.maxWidth.isFinite
+            ? math.min(widget.maxWidth, available)
+            : available;
         final effectiveMin = math.min(widget.minWidth, effectiveMax);
         final fieldWidth = effectiveMax;
         final labelWidth = math.max(0.0, fieldWidth - 48);
-        final menuWidth = _resolvedMenuWidth(
-          context,
-          textStyle: textStyle,
-          minimumWidth: fieldWidth,
-        );
 
         final popupTheme = theme.copyWith(
           splashColor: Colors.transparent,
@@ -97,133 +91,103 @@ class _PlatformDropdownState<T> extends State<PlatformDropdown<T>> {
           hoverColor: Colors.transparent,
         );
 
-        return AppControlBox(
-          minWidth: effectiveMin,
-          maxWidth: effectiveMax,
+        final dropdown = SizedBox(
           height: height,
-          expand: widget.expand,
-          alignment: Alignment.centerLeft,
-          child: SizedBox(
-            width: double.infinity,
-            child: Theme(
-              data: popupTheme,
-              child: PopupMenuButton<T>(
-                enabled: _enabled,
-                tooltip: '',
-                padding: EdgeInsets.zero,
-                position: PopupMenuPosition.under,
-                color: palette.surface,
-                surfaceTintColor: Colors.transparent,
-                shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.22),
-                elevation: 10,
-                onOpened: () {
-                  if (!mounted) return;
-                  setState(() {
-                    _isMenuOpen = true;
-                  });
-                },
-                onCanceled: () {
-                  if (!mounted) return;
+          child: Theme(
+            data: popupTheme,
+            child: PopupMenuButton<T>(
+              enabled: _enabled,
+              tooltip: '',
+              padding: EdgeInsets.zero,
+              position: PopupMenuPosition.under,
+              color: palette.surface,
+              surfaceTintColor: Colors.transparent,
+              shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.22),
+              elevation: 10,
+              onOpened: () {
+                if (!mounted) return;
+                setState(() {
+                  _isMenuOpen = true;
+                });
+              },
+              onCanceled: () {
+                if (!mounted) return;
+                setState(() {
+                  _isMenuOpen = false;
+                });
+              },
+              constraints: BoxConstraints.tightFor(width: fieldWidth),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: palette.border),
+              ),
+              onSelected: (selected) {
+                if (mounted) {
                   setState(() {
                     _isMenuOpen = false;
                   });
-                },
-                constraints: BoxConstraints(
-                  minWidth: menuWidth,
-                  maxWidth: menuWidth,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: palette.border),
-                ),
-                onSelected: (selected) {
-                  if (mounted) {
-                    setState(() {
-                      _isMenuOpen = false;
-                    });
-                  }
-                  widget.onChanged?.call(selected);
-                },
-                itemBuilder: (context) => [
-                  for (final entry in widget.items.indexed)
-                    PopupMenuItem<T>(
-                      value: entry.$2.value,
-                      padding: EdgeInsets.zero,
-                      height: 42,
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: _DropdownMenuRow(
-                          rowKey: ValueKey(
-                            'platform_dropdown_menu_row_${entry.$1}',
-                          ),
-                          label: entry.$2.label,
-                          isSelected: entry.$2.value == widget.value,
-                          palette: palette,
-                          textStyle: textStyle,
+                }
+                widget.onChanged?.call(selected);
+              },
+              itemBuilder: (context) => [
+                for (final entry in widget.items.indexed)
+                  PopupMenuItem<T>(
+                    value: entry.$2.value,
+                    padding: EdgeInsets.zero,
+                    height: 42,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: _DropdownMenuRow(
+                        rowKey: ValueKey(
+                          'platform_dropdown_menu_row_${entry.$1}',
                         ),
+                        label: entry.$2.label,
+                        isSelected: entry.$2.value == widget.value,
+                        palette: palette,
+                        textStyle: textStyle,
                       ),
                     ),
-                ],
-                child: MouseRegion(
-                  cursor: _enabled
-                      ? SystemMouseCursors.click
-                      : SystemMouseCursors.basic,
-                  onEnter: (_) {
-                    if (!_enabled) return;
-                    setState(() {
-                      _isHoveringField = true;
-                    });
-                  },
-                  onExit: (_) {
-                    if (!_enabled) return;
-                    setState(() {
-                      _isHoveringField = false;
-                    });
-                  },
-                  child: _DropdownField(
-                    label: _displayLabel,
-                    enabled: _enabled,
-                    isHovered: _isHoveringField,
-                    isOpen: _isMenuOpen,
-                    palette: palette,
-                    textStyle: textStyle,
-                    buttonLabelWidth: labelWidth,
                   ),
+              ],
+              child: MouseRegion(
+                cursor: _enabled
+                    ? SystemMouseCursors.click
+                    : SystemMouseCursors.basic,
+                onEnter: (_) {
+                  if (!_enabled) return;
+                  setState(() {
+                    _isHoveringField = true;
+                  });
+                },
+                onExit: (_) {
+                  if (!_enabled) return;
+                  setState(() {
+                    _isHoveringField = false;
+                  });
+                },
+                child: _DropdownField(
+                  label: _displayLabel,
+                  enabled: _enabled,
+                  isHovered: _isHoveringField,
+                  isOpen: _isMenuOpen,
+                  palette: palette,
+                  textStyle: textStyle,
+                  fieldWidth: fieldWidth,
+                  buttonLabelWidth: labelWidth,
                 ),
               ),
             ),
           ),
         );
+
+        return Align(
+          alignment: widget.expand
+              ? Alignment.centerLeft
+              : Alignment.centerRight,
+          child: dropdown,
+        );
       },
     );
-  }
-
-  double _resolvedMenuWidth(
-    BuildContext context, {
-    required TextStyle textStyle,
-    required double minimumWidth,
-  }) {
-    final textDirection = Directionality.maybeOf(context) ?? TextDirection.ltr;
-    var longestLabelWidth = 0.0;
-
-    for (final item in widget.items) {
-      final painter = TextPainter(
-        text: TextSpan(text: item.label, style: textStyle),
-        maxLines: 1,
-        textDirection: textDirection,
-      )..layout();
-      longestLabelWidth = math.max(longestLabelWidth, painter.width);
-    }
-
-    final viewportWidth =
-        MediaQuery.maybeOf(context)?.size.width ??
-        (_menuMaxWidthCap + _menuViewportPadding);
-    final safeMaxWidth = math.max(
-      minimumWidth,
-      math.min(viewportWidth - _menuViewportPadding, _menuMaxWidthCap),
-    );
-    final contentWidth = longestLabelWidth + _menuHorizontalChrome;
-    return contentWidth.clamp(minimumWidth, safeMaxWidth);
   }
 }
 
@@ -235,6 +199,7 @@ class _DropdownField extends StatelessWidget {
     required this.isOpen,
     required this.palette,
     required this.textStyle,
+    required this.fieldWidth,
     required this.buttonLabelWidth,
   });
 
@@ -244,6 +209,7 @@ class _DropdownField extends StatelessWidget {
   final bool isOpen;
   final _DropdownPalette palette;
   final TextStyle textStyle;
+  final double fieldWidth;
   final double buttonLabelWidth;
 
   @override
@@ -353,7 +319,7 @@ class _DropdownMenuRowState extends State<_DropdownMenuRow> {
         key: widget.rowKey,
         duration: const Duration(milliseconds: 140),
         curve: Curves.easeOut,
-        margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        margin: const EdgeInsets.symmetric(vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
           color: widget.palette.menuRowBackground(

@@ -45,7 +45,7 @@ void main() {
     );
   }
 
-  AnimatedContainer _dropdownField(WidgetTester tester) {
+  AnimatedContainer dropdownField(WidgetTester tester) {
     return tester.widget<AnimatedContainer>(
       find.descendant(
         of: find.byType(app.PlatformDropdown<String>),
@@ -54,7 +54,7 @@ void main() {
     );
   }
 
-  Text _dropdownLabel(WidgetTester tester) {
+  Text dropdownLabel(WidgetTester tester) {
     return tester.widget<Text>(
       find.descendant(
         of: find.byType(app.PlatformDropdown<String>),
@@ -63,7 +63,7 @@ void main() {
     );
   }
 
-  Icon _dropdownArrow(WidgetTester tester) {
+  Icon dropdownArrow(WidgetTester tester) {
     return tester.widget<Icon>(
       find.descendant(
         of: find.byType(app.PlatformDropdown<String>),
@@ -72,11 +72,11 @@ void main() {
     );
   }
 
-  BoxDecoration _fieldDecoration(WidgetTester tester) {
-    return _dropdownField(tester).decoration! as BoxDecoration;
+  BoxDecoration fieldDecoration(WidgetTester tester) {
+    return dropdownField(tester).decoration! as BoxDecoration;
   }
 
-  BoxDecoration _menuRowDecoration(WidgetTester tester, int index) {
+  BoxDecoration menuRowDecoration(WidgetTester tester, int index) {
     return tester
             .widget<AnimatedContainer>(
               find.byKey(ValueKey('platform_dropdown_menu_row_$index')),
@@ -85,7 +85,17 @@ void main() {
         as BoxDecoration;
   }
 
-  Future<TestGesture> _hover(WidgetTester tester, Finder finder) async {
+  double dropdownFieldWidth(WidgetTester tester) {
+    return tester.getSize(find.byKey(app.PlatformDropdown.fieldKey)).width;
+  }
+
+  double dropdownMenuRowWidth(WidgetTester tester, int index) {
+    return tester
+        .getSize(find.byKey(ValueKey('platform_dropdown_menu_row_$index')))
+        .width;
+  }
+
+  Future<TestGesture> hover(WidgetTester tester, Finder finder) async {
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer();
     await gesture.moveTo(tester.getCenter(finder));
@@ -110,9 +120,9 @@ void main() {
     await tester.pumpWidget(buildDropdownApp(themeMode: ThemeMode.dark));
     await tester.pumpAndSettle();
 
-    final decoration = _fieldDecoration(tester);
-    final label = _dropdownLabel(tester);
-    final arrow = _dropdownArrow(tester);
+    final decoration = fieldDecoration(tester);
+    final label = dropdownLabel(tester);
+    final arrow = dropdownArrow(tester);
 
     expect(decoration.color, const Color(0xFF232428));
     expect(label.style?.color, const Color(0xFF797A7E));
@@ -126,18 +136,16 @@ void main() {
     await tester.pumpWidget(buildDropdownApp(themeMode: ThemeMode.light));
     await tester.pumpAndSettle();
 
-    final decoration = _fieldDecoration(tester);
-    final label = _dropdownLabel(tester);
-    final arrow = _dropdownArrow(tester);
+    final decoration = fieldDecoration(tester);
+    final label = dropdownLabel(tester);
+    final arrow = dropdownArrow(tester);
 
     expect(decoration.color, const Color(0xFFF3F4F7));
     expect(label.style?.color, const Color(0xFF5F636B));
     expect(arrow.color, const Color(0xFF5F636B));
   });
 
-  testWidgets('opened menu grows wider than the closed field for long labels', (
-    tester,
-  ) async {
+  testWidgets('opened menu matches the closed field width', (tester) async {
     await tester.pumpWidget(
       buildDropdownApp(
         themeMode: ThemeMode.dark,
@@ -154,27 +162,37 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final fieldWidth = tester
-        .getSize(find.byKey(app.PlatformDropdown.fieldKey))
-        .width;
+    final resolvedFieldWidth = dropdownFieldWidth(tester);
 
     await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
     await tester.pumpAndSettle();
 
-    final menuRowWidth = tester
-        .getSize(find.byKey(const ValueKey('platform_dropdown_menu_row_0')))
-        .width;
+    final resolvedMenuRowWidth = dropdownMenuRowWidth(tester, 0);
 
-    expect(menuRowWidth, greaterThan(fieldWidth));
+    expect(resolvedMenuRowWidth, moreOrLessEquals(resolvedFieldWidth));
   });
 
-  testWidgets('opened menu width is clamped to a safe max width', (
+  testWidgets('opened menu matches a fixed narrow field width', (tester) async {
+    await tester.pumpWidget(
+      buildDropdownApp(themeMode: ThemeMode.dark, width: 100),
+    );
+    await tester.pumpAndSettle();
+
+    expect(dropdownFieldWidth(tester), moreOrLessEquals(100));
+
+    await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
+    await tester.pumpAndSettle();
+
+    expect(dropdownMenuRowWidth(tester, 0), moreOrLessEquals(100));
+  });
+
+  testWidgets('field and menu width respect the shared max-width cap', (
     tester,
   ) async {
     await tester.pumpWidget(
       buildDropdownApp(
         themeMode: ThemeMode.dark,
-        width: 220,
+        width: 420,
         items: const [
           app.PlatformMenuItem(value: 'short', label: 'Short'),
           app.PlatformMenuItem(
@@ -187,27 +205,64 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(dropdownFieldWidth(tester), moreOrLessEquals(360));
+
     await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
     await tester.pumpAndSettle();
 
-    final menuRowWidth = tester
-        .getSize(find.byKey(const ValueKey('platform_dropdown_menu_row_0')))
-        .width;
+    final resolvedMenuRowWidth = dropdownMenuRowWidth(tester, 0);
 
-    expect(menuRowWidth, lessThanOrEqualTo(480));
+    expect(resolvedMenuRowWidth, moreOrLessEquals(360));
   });
+
+  testWidgets(
+    'long menu labels stay single-line and ellipsized within field width',
+    (tester) async {
+      const longLabel =
+          'This label is intentionally extremely long so it should stay on one line and ellipsize inside the dropdown menu row instead of widening the popup';
+
+      await tester.pumpWidget(
+        buildDropdownApp(
+          themeMode: ThemeMode.dark,
+          width: 220,
+          items: const [
+            app.PlatformMenuItem(value: 'short', label: 'Short'),
+            app.PlatformMenuItem(value: 'huge', label: longLabel),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
+      await tester.pumpAndSettle();
+
+      final menuText = tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(const ValueKey('platform_dropdown_menu_row_1')),
+          matching: find.text(longLabel),
+        ),
+      );
+
+      expect(menuText.maxLines, 1);
+      expect(menuText.overflow, TextOverflow.ellipsis);
+      expect(
+        dropdownMenuRowWidth(tester, 1),
+        moreOrLessEquals(dropdownFieldWidth(tester)),
+      );
+    },
+  );
 
   testWidgets('closed field hover changes decoration', (tester) async {
     await tester.pumpWidget(buildDropdownApp(themeMode: ThemeMode.dark));
     await tester.pumpAndSettle();
 
-    final before = _fieldDecoration(tester);
+    final before = fieldDecoration(tester);
 
-    final gesture = await _hover(
+    final gesture = await hover(
       tester,
       find.byKey(app.PlatformDropdown.fieldKey),
     );
-    final after = _fieldDecoration(tester);
+    final after = fieldDecoration(tester);
 
     expect(after.color, isNot(before.color));
     expect(
@@ -222,13 +277,13 @@ void main() {
     await tester.pumpWidget(buildDropdownApp(themeMode: ThemeMode.dark));
     await tester.pumpAndSettle();
 
-    final before = _fieldDecoration(tester);
+    final before = fieldDecoration(tester);
 
     await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
     await tester.pumpAndSettle();
 
-    final after = _fieldDecoration(tester);
-    final arrow = _dropdownArrow(tester);
+    final after = fieldDecoration(tester);
+    final arrow = dropdownArrow(tester);
 
     expect(after.color, isNot(before.color));
     expect(
@@ -247,8 +302,8 @@ void main() {
     await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
     await tester.pumpAndSettle();
 
-    final selected = _menuRowDecoration(tester, 0);
-    final unselected = _menuRowDecoration(tester, 1);
+    final selected = menuRowDecoration(tester, 0);
+    final unselected = menuRowDecoration(tester, 1);
 
     expect(selected.color, isNot(unselected.color));
   });
@@ -260,12 +315,12 @@ void main() {
     await tester.tap(find.byKey(app.PlatformDropdown.fieldKey));
     await tester.pumpAndSettle();
 
-    final before = _menuRowDecoration(tester, 1);
-    final gesture = await _hover(
+    final before = menuRowDecoration(tester, 1);
+    final gesture = await hover(
       tester,
       find.byKey(const ValueKey('platform_dropdown_menu_row_1')),
     );
-    final after = _menuRowDecoration(tester, 1);
+    final after = menuRowDecoration(tester, 1);
 
     expect(after.color, isNot(before.color));
 

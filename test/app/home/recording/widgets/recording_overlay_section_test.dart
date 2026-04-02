@@ -2,6 +2,7 @@ import 'package:clingfy/app/home/recording/widgets/recording_overlay_section.dar
 import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/core/overlay/overlay_mode.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
+import 'package:clingfy/ui/platform/widgets/app_sidebar_tokens.dart';
 import 'package:clingfy/ui/platform/widgets/platform_dropdown.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -95,6 +96,26 @@ void main() {
     );
     expect(dropdown.items.first.label, l10n.squircle);
   });
+
+  testWidgets(
+    'sidebar dropdown fields fill the available control width by default',
+    (tester) async {
+      await tester.pumpWidget(_buildSection());
+      await tester.pumpAndSettle();
+
+      final shapeField = find.descendant(
+        of: find.byWidgetPredicate(
+          (widget) => widget is PlatformDropdown<OverlayShape>,
+        ),
+        matching: find.byKey(PlatformDropdown.fieldKey),
+      );
+
+      expect(
+        tester.getSize(shapeField).width,
+        moreOrLessEquals(AppSidebarTokens.controlMaxWidth),
+      );
+    },
+  );
 
   testWidgets(
     'custom position badge exposes tooltip helper when custom mode is on',
