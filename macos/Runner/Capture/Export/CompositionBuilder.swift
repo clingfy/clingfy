@@ -588,6 +588,11 @@ final class CompositionBuilder {
     let zoomState: CameraAnimationZoomState
   }
 
+  private struct VisibleRegionMaskSample {
+    let time: Double
+    let cameraFrame: CGRect?
+  }
+
   private enum ExportZoomApplicationMode {
     case compositeVideoLayer
     case screenOverlayOnly
@@ -654,6 +659,9 @@ final class CompositionBuilder {
 
     let instruction = AVMutableVideoCompositionInstruction()
     instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+    if let backgroundColor = params.backgroundColor {
+      instruction.backgroundColor = exportBackgroundColor(backgroundColor)
+    }
     let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: vTrack)
 
     if forExport {
@@ -690,6 +698,7 @@ final class CompositionBuilder {
         ty: ty,
         videoToTargetScale: s,
         zoomSamples: exportZoomSamples,
+        visibleRegionMaskSamples: [],
         zoomApplicationMode: .compositeVideoLayer,
         includeRoundedMask: true
       )
@@ -801,6 +810,7 @@ final class CompositionBuilder {
         canvasSize: target,
         params: cameraParams
       )
+      var cameraMaskSamples: [VisibleRegionMaskSample] = []
 
       if cameraResolution.shouldRender,
         let cameraTrack = cameraAsset.tracks(withMediaType: .video).first,
@@ -901,6 +911,9 @@ final class CompositionBuilder {
               zoomState: sample.zoomState
             )
           }
+          let cameraOpacities = resolvedCameraPresentation.map { animatedCamera in
+            Float(max(0.0, min(1.0, animatedCamera.opacity)))
+          }
           var didLogFirstActiveZoomSample = false
           let cameraTransforms = resolvedCameraPresentation.enumerated().map { idx, animatedCamera in
             // CameraLayoutResolver returns frames in CG bottom-left-origin
@@ -924,6 +937,13 @@ final class CompositionBuilder {
               mirror: cameraAssetIsPreStyled ? false : cameraParams.mirror
             )
             let sample = cameraPresentation[idx]
+            let cameraOpacity = cameraOpacities[idx]
+            cameraMaskSamples.append(
+              VisibleRegionMaskSample(
+                time: sample.time,
+                cameraFrame: cameraOpacity > 0.001 ? animatedCamera.frame.standardized : nil
+              )
+            )
             let isFirstActiveZoomSample = sample.zoomState.isActive && !didLogFirstActiveZoomSample
             if isFirstActiveZoomSample {
               didLogFirstActiveZoomSample = true
@@ -986,8 +1006,15 @@ final class CompositionBuilder {
             }
             return transform
           }
-          let cameraOpacities = resolvedCameraPresentation.map { animatedCamera in
-            Float(max(0.0, min(1.0, animatedCamera.opacity)))
+          if effectiveDuration < screenAsset.duration.seconds {
+            let frameDuration = 1.0 / max(Double(params.fpsHint), 30.0)
+            let hideTime = min(screenAsset.duration.seconds, effectiveDuration + frameDuration)
+            cameraMaskSamples.append(
+              VisibleRegionMaskSample(
+                time: hideTime,
+                cameraFrame: nil
+              )
+            )
           }
 
           if let firstTransform = cameraTransforms.first {
@@ -1049,6 +1076,9 @@ final class CompositionBuilder {
 
       let instruction = AVMutableVideoCompositionInstruction()
       instruction.timeRange = CMTimeRange(start: .zero, duration: screenAsset.duration)
+      if let backgroundColor = params.backgroundColor {
+        instruction.backgroundColor = exportBackgroundColor(backgroundColor)
+      }
       instruction.layerInstructions = layerInstructions
 
       let videoComposition = AVMutableVideoComposition()
@@ -1070,6 +1100,7 @@ final class CompositionBuilder {
         ty: ty,
         videoToTargetScale: screenScale,
         zoomSamples: exportZoomSamples,
+        visibleRegionMaskSamples: cameraMaskSamples,
         zoomApplicationMode: .screenOverlayOnly,
         includeRoundedMask: false
       )
@@ -1265,6 +1296,152 @@ final class CompositionBuilder {
     }
   }
 
+  private func visibleRegionMaskPath(
+    screenContentRect: CGRect,
+    screenCornerRadius: CGFloat,
+    cameraFrame: CGRect?
+  ) -> CGPath {
+    let path = CGMutablePath()
+    let screenRect = screenContentRect.standardized
+
+    if screenRect.width > 0.0, screenRect.height > 0.0 {
+      if screenCornerRadius > 0.0 {
+        path.addPath(
+          CGPath(
+            roundedRect: screenRect,
+            cornerWidth: screenCornerRadius,
+            cornerHeight: screenCornerRadius,
+            transform: nil
+          )
+        )
+      } else {
+        path.addRect(screenRect)
+      }
+    }
+
+    if let cameraFrame {
+      let rect = cameraFrame.standardized
+      if rect.width > 0.0, rect.height > 0.0 {
+        path.addRect(rect)
+      }
+    }
+
+    return path.copy()
+      ?? CGPath(rect: screenRect, transform: nil)
+  }
+
+  private func rectsApproximatelyEqual(
+    _ lhs: CGRect?,
+    _ rhs: CGRect?,
+    epsilon: CGFloat = 0.0001
+  ) -> Bool {
+    switch (lhs, rhs) {
+    case (nil, nil):
+      return true
+    case let (lhsRect?, rhsRect?):
+      return abs(lhsRect.minX - rhsRect.minX) <= epsilon
+        && abs(lhsRect.minY - rhsRect.minY) <= epsilon
+        && abs(lhsRect.width - rhsRect.width) <= epsilon
+        && abs(lhsRect.height - rhsRect.height) <= epsilon
+    default:
+      return false
+    }
+  }
+
+  private func normalizedVisibleRegionMaskSamples(
+    _ samples: [VisibleRegionMaskSample],
+    totalDuration: Double
+  ) -> [VisibleRegionMaskSample] {
+    guard !samples.isEmpty else { return [] }
+
+    let sorted = samples
+      .sorted { $0.time < $1.time }
+      .reduce(into: [VisibleRegionMaskSample]()) { result, sample in
+        if let last = result.last, abs(last.time - sample.time) <= 0.0001 {
+          result[result.count - 1] = sample
+        } else {
+          result.append(sample)
+        }
+      }
+
+    guard !sorted.isEmpty else { return [] }
+
+    var normalized = sorted
+    if normalized[0].time > 0.0 {
+      normalized.insert(
+        VisibleRegionMaskSample(time: 0.0, cameraFrame: normalized[0].cameraFrame),
+        at: 0
+      )
+    } else if normalized[0].time < 0.0 {
+      normalized[0] = VisibleRegionMaskSample(time: 0.0, cameraFrame: normalized[0].cameraFrame)
+    }
+
+    let clampedDuration = max(totalDuration, normalized.last?.time ?? 0.0)
+    if let last = normalized.last, last.time < clampedDuration {
+      normalized.append(
+        VisibleRegionMaskSample(time: clampedDuration, cameraFrame: last.cameraFrame)
+      )
+    }
+
+    return normalized
+  }
+
+  private func exportBackgroundColor(_ argb: Int) -> CGColor {
+    let r = CGFloat((argb >> 16) & 0xFF) / 255.0
+    let g = CGFloat((argb >> 8) & 0xFF) / 255.0
+    let b = CGFloat(argb & 0xFF) / 255.0
+    let a = (argb > 0xFFFFFF) ? CGFloat((argb >> 24) & 0xFF) / 255.0 : 1.0
+    return CGColor(red: r, green: g, blue: b, alpha: a)
+  }
+
+  private func applyVisibleRegionMask(
+    to contentLayer: CALayer,
+    target: CGSize,
+    screenContentRect: CGRect,
+    screenCornerRadius: CGFloat,
+    samples: [VisibleRegionMaskSample],
+    totalDuration: Double
+  ) {
+    let maskLayer = CAShapeLayer()
+    maskLayer.frame = CGRect(origin: .zero, size: target)
+    maskLayer.fillColor = NSColor.white.cgColor
+
+    let normalizedSamples = normalizedVisibleRegionMaskSamples(samples, totalDuration: totalDuration)
+    let initialCameraFrame = normalizedSamples.first?.cameraFrame
+    maskLayer.path = visibleRegionMaskPath(
+      screenContentRect: screenContentRect,
+      screenCornerRadius: screenCornerRadius,
+      cameraFrame: initialCameraFrame
+    )
+
+    if normalizedSamples.count >= 2,
+      normalizedSamples.dropFirst().contains(where: {
+        !rectsApproximatelyEqual($0.cameraFrame, normalizedSamples[0].cameraFrame)
+      })
+    {
+      let duration = max(totalDuration, normalizedSamples.last?.time ?? 0.0, 0.0001)
+      let animation = CAKeyframeAnimation(keyPath: "path")
+      animation.beginTime = AVCoreAnimationBeginTimeAtZero
+      animation.duration = duration
+      animation.values = normalizedSamples.map {
+        visibleRegionMaskPath(
+          screenContentRect: screenContentRect,
+          screenCornerRadius: screenCornerRadius,
+          cameraFrame: $0.cameraFrame
+        )
+      }
+      animation.keyTimes = normalizedSamples.map {
+        NSNumber(value: min(max($0.time / duration, 0.0), 1.0))
+      }
+      animation.fillMode = .forwards
+      animation.isRemovedOnCompletion = false
+      animation.calculationMode = .linear
+      maskLayer.add(animation, forKey: "visibleRegionMaskPath")
+    }
+
+    contentLayer.mask = maskLayer
+  }
+
   private func configureExportAnimationTool(
     composition: AVMutableVideoComposition,
     target: CGSize,
@@ -1278,12 +1455,12 @@ final class CompositionBuilder {
     ty: Double,
     videoToTargetScale: CGFloat,
     zoomSamples: [ExportZoomSample],
+    visibleRegionMaskSamples: [VisibleRegionMaskSample],
     zoomApplicationMode: ExportZoomApplicationMode,
     includeRoundedMask: Bool
   ) {
     guard
       params.cornerRadius > 0
-        || params.backgroundColor != nil
         || params.backgroundImagePath != nil
         || params.showCursor
         || (zoomApplicationMode == .compositeVideoLayer && !zoomSamples.isEmpty)
@@ -1301,11 +1478,7 @@ final class CompositionBuilder {
       bgLayer.contents = img.cgImageForLayer()
       bgLayer.contentsGravity = .resizeAspectFill
     } else if let color = params.backgroundColor {
-      let r = CGFloat((color >> 16) & 0xFF) / 255.0
-      let g = CGFloat((color >> 8) & 0xFF) / 255.0
-      let b = CGFloat(color & 0xFF) / 255.0
-      let a = (color > 0xFFFFFF) ? CGFloat((color >> 24) & 0xFF) / 255.0 : 1.0
-      bgLayer.backgroundColor = CGColor(red: r, green: g, blue: b, alpha: a)
+      bgLayer.backgroundColor = exportBackgroundColor(color)
     } else {
       bgLayer.backgroundColor = CGColor.black
     }
@@ -1317,16 +1490,15 @@ final class CompositionBuilder {
     videoLayer.position = .zero
     parentLayer.addSublayer(videoLayer)
 
-    if includeRoundedMask, params.cornerRadius > 0 {
-      let maskLayer = CAShapeLayer()
-      let path = CGPath(
-        roundedRect: contentRect,
-        cornerWidth: CGFloat(params.cornerRadius),
-        cornerHeight: CGFloat(params.cornerRadius),
-        transform: nil
+    if params.backgroundImagePath != nil || includeRoundedMask {
+      applyVisibleRegionMask(
+        to: videoLayer,
+        target: target,
+        screenContentRect: contentRect,
+        screenCornerRadius: includeRoundedMask ? CGFloat(params.cornerRadius) : 0.0,
+        samples: visibleRegionMaskSamples,
+        totalDuration: asset.duration.seconds
       )
-      maskLayer.path = path
-      videoLayer.mask = maskLayer
     }
 
     let screenOverlayLayer: CALayer? = {

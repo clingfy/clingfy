@@ -2124,6 +2124,264 @@ final class LetterboxExporterTests: XCTestCase {
     XCTAssertTrue(FileManager.default.fileExists(atPath: finalURL.path))
   }
 
+  func testScreenOnlyExportUsesBackgroundColorForLetterboxArea() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 180, height: 320),
+      durationSeconds: 1.0,
+      color: .blue
+    )
+
+    let target = CGSize(width: 640, height: 360)
+    let exporter = LetterboxExporter()
+    let exportExpectation = expectation(description: "screen-only export with background color")
+    var exportResult: Result<URL, Error>?
+
+    exporter.export(
+      inputURL: screenURL,
+      cameraInputURL: nil,
+      target: target,
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: 0xFFFF0000,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: false,
+      zoomFactor: 1.5,
+      followStrength: 0.15,
+      fpsHint: 30,
+      outputURL: tempDir.appendingPathComponent("screen-only-bg.mp4"),
+      format: "mp4",
+      codec: "h264",
+      bitrate: "auto",
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0,
+      autoNormalizeOnExport: false,
+      targetLoudnessDbfs: -16.0,
+      cameraParams: nil
+    ) { result in
+      exportResult = result
+      exportExpectation.fulfill()
+    }
+
+    wait(for: [exportExpectation], timeout: 30.0)
+    let finalURL = try XCTUnwrap(try exportResult?.get())
+    let image = try sampleFrameImage(url: finalURL)
+
+    let cornerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: target,
+        cropRect: CGRect(x: 0, y: 0, width: 80, height: 80)
+      )
+    )
+    XCTAssertGreaterThan(
+      try dominantRedRatio(for: cornerCrop, ignoreTransparentPixels: false),
+      0.80
+    )
+
+    let centerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: target,
+        cropRect: CGRect(x: 260, y: 110, width: 120, height: 140)
+      )
+    )
+    XCTAssertGreaterThan(
+      try dominantBlueRatio(for: centerCrop, ignoreTransparentPixels: false),
+      0.80
+    )
+  }
+
+  func testScreenOnlyExportUsesBackgroundImageForLetterboxArea() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let backgroundURL = tempDir.appendingPathComponent("background.png")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 180, height: 320),
+      durationSeconds: 1.0,
+      color: .blue
+    )
+    try makeSolidColorImage(
+      url: backgroundURL,
+      size: CGSize(width: 640, height: 360),
+      color: .red
+    )
+
+    let target = CGSize(width: 640, height: 360)
+    let exporter = LetterboxExporter()
+    let exportExpectation = expectation(description: "screen-only export with background image")
+    var exportResult: Result<URL, Error>?
+
+    exporter.export(
+      inputURL: screenURL,
+      cameraInputURL: nil,
+      target: target,
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: nil,
+      backgroundImagePath: backgroundURL.path,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: false,
+      zoomFactor: 1.5,
+      followStrength: 0.15,
+      fpsHint: 30,
+      outputURL: tempDir.appendingPathComponent("screen-only-bg-image.mp4"),
+      format: "mp4",
+      codec: "h264",
+      bitrate: "auto",
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0,
+      autoNormalizeOnExport: false,
+      targetLoudnessDbfs: -16.0,
+      cameraParams: nil
+    ) { result in
+      exportResult = result
+      exportExpectation.fulfill()
+    }
+
+    wait(for: [exportExpectation], timeout: 30.0)
+    let finalURL = try XCTUnwrap(try exportResult?.get())
+    let image = try sampleFrameImage(url: finalURL)
+
+    let cornerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: target,
+        cropRect: CGRect(x: 0, y: 0, width: 80, height: 80)
+      )
+    )
+    XCTAssertGreaterThan(
+      try dominantRedRatio(for: cornerCrop, ignoreTransparentPixels: false),
+      0.80
+    )
+
+    let centerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: target,
+        cropRect: CGRect(x: 260, y: 110, width: 120, height: 140)
+      )
+    )
+    XCTAssertGreaterThan(
+      try dominantBlueRatio(for: centerCrop, ignoreTransparentPixels: false),
+      0.80
+    )
+  }
+
+  func testSeparateCameraExportUsesBackgroundColorOutsideScreenContent() throws {
+    let tempDir = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    try makeSolidColorVideo(
+      url: screenURL,
+      size: CGSize(width: 180, height: 320),
+      durationSeconds: 1.0,
+      color: .blue
+    )
+    try makeSolidColorVideo(
+      url: cameraURL,
+      size: CGSize(width: 128, height: 128),
+      durationSeconds: 1.0,
+      color: .green
+    )
+
+    let cameraParams = CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomRight,
+      normalizedCanvasCenter: nil,
+      sizeFactor: 0.24,
+      shape: .square,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: false,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
+    )
+
+    let target = CGSize(width: 640, height: 360)
+    let exporter = LetterboxExporter()
+    let exportExpectation = expectation(description: "separate-camera export with background color")
+    var exportResult: Result<URL, Error>?
+
+    exporter.export(
+      inputURL: screenURL,
+      cameraInputURL: cameraURL,
+      target: target,
+      padding: 0.0,
+      cornerRadius: 0.0,
+      backgroundColor: 0xFFFF0000,
+      backgroundImagePath: nil,
+      cursorSize: 1.0,
+      showCursor: false,
+      zoomEnabled: false,
+      zoomFactor: 1.5,
+      followStrength: 0.15,
+      fpsHint: 30,
+      outputURL: tempDir.appendingPathComponent("screen-camera-bg.mp4"),
+      format: "mp4",
+      codec: "h264",
+      bitrate: "auto",
+      fitMode: "fit",
+      audioGainDb: 0.0,
+      audioVolumePercent: 100.0,
+      autoNormalizeOnExport: false,
+      targetLoudnessDbfs: -16.0,
+      cameraParams: cameraParams
+    ) { result in
+      exportResult = result
+      exportExpectation.fulfill()
+    }
+
+    wait(for: [exportExpectation], timeout: 30.0)
+    let finalURL = try XCTUnwrap(try exportResult?.get())
+    let image = try sampleFrameImage(url: finalURL)
+
+    let cornerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: target,
+        cropRect: CGRect(x: 0, y: 0, width: 80, height: 80)
+      )
+    )
+    XCTAssertGreaterThan(
+      try dominantRedRatio(for: cornerCrop, ignoreTransparentPixels: false),
+      0.80
+    )
+
+    let centerCrop = try XCTUnwrap(
+      bestCropImage(
+        for: image,
+        canvasSize: target,
+        cropRect: CGRect(x: 260, y: 110, width: 120, height: 140)
+      )
+    )
+    XCTAssertGreaterThan(
+      try dominantBlueRatio(for: centerCrop, ignoreTransparentPixels: false),
+      0.75
+    )
+
+  }
+
   func testStyledCameraIntermediateValidationFailsForBlackStyledAsset() throws {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -2269,6 +2527,37 @@ final class LetterboxExporterTests: XCTestCase {
       subjectColor: nil,
       preferredTransform: preferredTransform
     )
+  }
+
+  private func makeSolidColorImage(
+    url: URL,
+    size: CGSize,
+    color: NSColor
+  ) throws {
+    let width = max(Int(size.width.rounded(.up)), 1)
+    let height = max(Int(size.height.rounded(.up)), 1)
+    let imageRep = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: width,
+      pixelsHigh: height,
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: 0,
+      bitsPerPixel: 0
+    )
+    let rep = try XCTUnwrap(imageRep)
+    NSGraphicsContext.saveGraphicsState()
+    let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
+    NSGraphicsContext.current = context
+    color.setFill()
+    NSBezierPath(rect: CGRect(x: 0, y: 0, width: width, height: height)).fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    try data.write(to: url)
   }
 
   private func makeGreenScreenSubjectVideo(
@@ -2572,6 +2861,19 @@ final class LetterboxExporterTests: XCTestCase {
       ignoreTransparentPixels: ignoreTransparentPixels,
       predicate: { red, green, blue in
         Int(red) > Int(green) + 20 && Int(red) > Int(blue) + 20
+      }
+    )
+  }
+
+  private func dominantBlueRatio(
+    for image: CGImage,
+    ignoreTransparentPixels: Bool
+  ) throws -> Double {
+    try colorRatio(
+      for: image,
+      ignoreTransparentPixels: ignoreTransparentPixels,
+      predicate: { red, green, blue in
+        Int(blue) > Int(red) + 20 && Int(blue) > Int(green) + 20
       }
     )
   }
@@ -3453,6 +3755,14 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
   func testResolveTargetSizeHonorsLayoutAspectForAutoResolution() {
     let facade = ScreenRecorderFacade()
     let sourceSize = CGSize(width: 3024, height: 1964)
+
+    let classic = facade._testResolveTargetSize(
+      sourceSize: sourceSize,
+      layout: "classic43",
+      resolution: "auto"
+    )
+    XCTAssertEqual(classic.width, 3024, accuracy: 0.0001)
+    XCTAssertEqual(classic.height, 2268, accuracy: 0.0001)
 
     let square = facade._testResolveTargetSize(
       sourceSize: sourceSize,

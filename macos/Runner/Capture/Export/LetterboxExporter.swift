@@ -65,6 +65,11 @@ final class LetterboxExporter {
     }
   }
 
+  private func formattedBackgroundColor(_ color: Int?) -> String {
+    guard let color else { return "nil" }
+    return String(format: "0x%08X", color)
+  }
+
   private func validationSampleTime(for asset: AVAsset) -> CMTime {
     let seconds = asset.duration.seconds
     guard seconds.isFinite, seconds > 0 else { return .zero }
@@ -544,6 +549,9 @@ final class LetterboxExporter {
         "fpsHint": fpsHint,
         "format": format,
         "codec": codec,
+        "backgroundColor": formattedBackgroundColor(backgroundColor),
+        "backgroundImagePath": backgroundImagePath ?? "nil",
+        "hasCustomBackground": backgroundColor != nil || backgroundImagePath != nil,
       ])
 
     func pickPreset(for exportAsset: AVAsset) -> String {
@@ -744,6 +752,9 @@ final class LetterboxExporter {
           "resolvedVolumePercent": resolvedAudioMix.volumePercent,
           "sourcePeakDbfs": resolvedAudioMix.sourcePeakDbfs ?? NSNull(),
           "normalizationGainDb": resolvedAudioMix.normalizationGainDb ?? NSNull(),
+          "backgroundColor": self.formattedBackgroundColor(backgroundColor),
+          "backgroundImagePath": backgroundImagePath ?? "nil",
+          "hasCustomBackground": backgroundColor != nil || backgroundImagePath != nil,
           "supportedTypes": export.supportedFileTypes.map(\.rawValue),
           "finalURL": finalURL.path,
         ]
