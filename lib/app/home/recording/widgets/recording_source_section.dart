@@ -89,34 +89,37 @@ class RecordingSourceSection extends StatelessWidget {
       children: [
         AppFormRow(
           label: l10n.recordTarget,
-          control: PlatformDropdown<DisplayTargetMode>(
-            value: targetMode,
-            minWidth: 0,
-            maxWidth: double.infinity,
-            expand: true,
-            onChanged: isRecording
-                ? null
-                : (mode) {
-                    if (mode != null) onTargetModeChanged(mode);
-                  },
-            items: [
-              PlatformMenuItem(
-                value: DisplayTargetMode.explicitId,
-                label: l10n.chosenScreen,
-              ),
-              PlatformMenuItem(
-                value: DisplayTargetMode.singleAppWindow,
-                label: l10n.specificAppWindow,
-              ),
-              PlatformMenuItem(
-                value: DisplayTargetMode.areaRecording,
-                label: l10n.areaRecording,
-              ),
-              PlatformMenuItem(
-                value: DisplayTargetMode.mouseAtStart,
-                label: l10n.screenUnderMouse,
-              ),
-            ],
+          control: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minWidth: AppSidebarTokens.controlMinWidth,
+              maxWidth: AppSidebarTokens.controlMaxWidth,
+            ),
+            child: PlatformDropdown<DisplayTargetMode>(
+              value: targetMode,
+              onChanged: isRecording
+                  ? null
+                  : (mode) {
+                      if (mode != null) onTargetModeChanged(mode);
+                    },
+              items: [
+                PlatformMenuItem(
+                  value: DisplayTargetMode.explicitId,
+                  label: l10n.chosenScreen,
+                ),
+                PlatformMenuItem(
+                  value: DisplayTargetMode.singleAppWindow,
+                  label: l10n.specificAppWindow,
+                ),
+                PlatformMenuItem(
+                  value: DisplayTargetMode.areaRecording,
+                  label: l10n.areaRecording,
+                ),
+                PlatformMenuItem(
+                  value: DisplayTargetMode.mouseAtStart,
+                  label: l10n.screenUnderMouse,
+                ),
+              ],
+            ),
           ),
         ),
         _AnimatedSection(
@@ -127,7 +130,8 @@ class RecordingSourceSection extends StatelessWidget {
                   padding: const EdgeInsets.only(
                     top: AppSidebarTokens.optionsSubgroupGap,
                   ),
-                  child: AppInsetGroup(children: targetDetails),
+
+                  child: AppInsetGroup(padding: 0, children: targetDetails),
                 ),
         ),
       ],
@@ -176,24 +180,27 @@ class RecordingSourceSection extends StatelessWidget {
       return [
         AppFormRow(
           label: l10n.screenToRecord,
-          control: PlatformDropdown<int?>(
-            value: validDisplayId,
-            minWidth: 0,
-            maxWidth: double.infinity,
-            expand: true,
-            items: [
-              PlatformMenuItem(value: null, label: l10n.mainDisplay),
-              ...displays.map(
-                (display) => PlatformMenuItem(
-                  value: display.id,
-                  label:
-                      '${display.name}  (${display.width.toInt()}×${display.height.toInt()} @${display.scale}x)',
+          control: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minWidth: AppSidebarTokens.controlMinWidth,
+              maxWidth: AppSidebarTokens.controlMaxWidth,
+            ),
+            child: PlatformDropdown<int?>(
+              value: validDisplayId,
+              items: [
+                PlatformMenuItem(value: null, label: l10n.mainDisplay),
+                ...displays.map(
+                  (display) => PlatformMenuItem(
+                    value: display.id,
+                    label:
+                        '${display.name}  (${display.width.toInt()}×${display.height.toInt()} @${display.scale}x)',
+                  ),
                 ),
-              ),
-            ],
-            onChanged: isDisplayTarget && !isRecording
-                ? onDisplayChanged
-                : null,
+              ],
+              onChanged: isDisplayTarget && !isRecording
+                  ? onDisplayChanged
+                  : null,
+            ),
           ),
         ),
       ];
@@ -203,21 +210,24 @@ class RecordingSourceSection extends StatelessWidget {
       return [
         AppFormRow(
           label: l10n.windowToRecord,
-          control: PlatformDropdown<int?>(
-            value: validAppWindowId,
-            minWidth: 0,
-            maxWidth: double.infinity,
-            expand: true,
-            items: [
-              PlatformMenuItem(value: null, label: l10n.selectAppWindow),
-              ...appWindows.map(
-                (window) =>
-                    PlatformMenuItem(value: window.id, label: window.label),
-              ),
-            ],
-            onChanged: isAppWindowTarget && !isRecording
-                ? onAppWindowChanged
-                : null,
+          control: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minWidth: AppSidebarTokens.controlMinWidth,
+              maxWidth: AppSidebarTokens.controlMaxWidth,
+            ),
+            child: PlatformDropdown<int?>(
+              value: validAppWindowId,
+              items: [
+                PlatformMenuItem(value: null, label: l10n.selectAppWindow),
+                ...appWindows.map(
+                  (window) =>
+                      PlatformMenuItem(value: window.id, label: window.label),
+                ),
+              ],
+              onChanged: isAppWindowTarget && !isRecording
+                  ? onAppWindowChanged
+                  : null,
+            ),
           ),
         ),
       ];
