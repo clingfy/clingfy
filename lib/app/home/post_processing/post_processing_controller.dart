@@ -95,7 +95,7 @@ class PostProcessingController extends ChangeNotifier {
   double _zoomFactor = 1.5;
   bool _showCursor = true;
   String? _previewPath;
-  String? _sourcePath;
+  String? _projectPath;
   String? _activeSessionId;
   bool _cursorAvailable = true;
   double _audioGainDb = 0.0;
@@ -301,7 +301,7 @@ class PostProcessingController extends ChangeNotifier {
   void setCameraIntroDurationMs(double value) {
     final current = _cameraState ?? const CameraCompositionState.hidden();
     _cameraState = current.copyWith(
-      introDurationMs: value.round().clamp(80, 600) as int,
+      introDurationMs: value.round().clamp(80, 600).toInt(),
     );
     notifyListeners();
   }
@@ -314,7 +314,7 @@ class PostProcessingController extends ChangeNotifier {
   void setCameraOutroDurationMs(double value) {
     final current = _cameraState ?? const CameraCompositionState.hidden();
     _cameraState = current.copyWith(
-      outroDurationMs: value.round().clamp(80, 600) as int,
+      outroDurationMs: value.round().clamp(80, 600).toInt(),
     );
     notifyListeners();
   }
@@ -456,14 +456,14 @@ class PostProcessingController extends ChangeNotifier {
 
   void attachToRecording({
     required String sessionId,
-    required String sourcePath,
+    required String projectPath,
   }) {
     _resetForNewRecording();
     _activeSessionId = sessionId;
-    _sourcePath = sourcePath;
-    _previewPath = sourcePath;
+    _projectPath = projectPath;
+    _previewPath = projectPath;
     notifyListeners();
-    unawaited(_loadRecordingSceneInfo(sourcePath));
+    unawaited(_loadRecordingSceneInfo(projectPath));
   }
 
   void detachRecording() {
@@ -472,12 +472,12 @@ class PostProcessingController extends ChangeNotifier {
   }
 
   Future<void> prepareInitialPreview({required String sessionId}) async {
-    if (_activeSessionId != sessionId || _sourcePath == null) return;
+    if (_activeSessionId != sessionId || _projectPath == null) return;
     await applyProcessing();
   }
 
   Future<void> reapplyPreviewComposition({required String sessionId}) async {
-    if (_activeSessionId != sessionId || _sourcePath == null) return;
+    if (_activeSessionId != sessionId || _projectPath == null) return;
     await applyProcessing();
   }
 
@@ -490,7 +490,7 @@ class PostProcessingController extends ChangeNotifier {
     _zoomFactor = 1.5;
     _showCursor = true;
     _previewPath = null;
-    _sourcePath = null;
+    _projectPath = null;
     _activeSessionId = null;
     _cursorAvailable = true;
     _audioGainDb = _settings.post.postAudioGainDb;
@@ -501,10 +501,10 @@ class PostProcessingController extends ChangeNotifier {
     _hasExportedCurrentRecording = false;
   }
 
-  Future<void> _loadRecordingSceneInfo(String sourcePath) async {
+  Future<void> _loadRecordingSceneInfo(String projectPath) async {
     try {
-      final sceneInfo = await _nativeBridge.getRecordingSceneInfo(sourcePath);
-      if (_sourcePath != sourcePath) {
+      final sceneInfo = await _nativeBridge.getRecordingSceneInfo(projectPath);
+      if (_projectPath != projectPath) {
         return;
       }
       _cameraPath = sceneInfo.cameraPath;
@@ -526,8 +526,8 @@ class PostProcessingController extends ChangeNotifier {
   }
 
   Future<void> applyProcessing() async {
-    final originalPath = _sourcePath;
-    if (originalPath == null) return;
+    final projectPath = _projectPath;
+    if (projectPath == null) return;
 
     _isProcessingPreview = true;
     notifyListeners();
@@ -537,7 +537,7 @@ class PostProcessingController extends ChangeNotifier {
         'layoutPreset': _settings.post.layoutPreset.name,
         'resolutionPreset': _settings.post.resolutionPreset.name,
         'fitMode': _settings.post.fitMode.name,
-        'path': originalPath,
+        'projectPath': projectPath,
         'padding': _videoPadding,
         'cornerRadius': _videoRadius,
         'backgroundColor': _backgroundColor,
@@ -622,8 +622,8 @@ class PostProcessingController extends ChangeNotifier {
       return null;
     }
 
-    final originalPath = _sourcePath;
-    if (originalPath == null) return null;
+    final projectPath = _projectPath;
+    if (projectPath == null) return null;
 
     final l10n = AppLocalizations.of(context)!;
     final dialogResult = await ExportFileDialog.show(
@@ -740,7 +740,7 @@ class PostProcessingController extends ChangeNotifier {
         'layoutPreset': _settings.post.layoutPreset.name,
         'resolutionPreset': _settings.post.resolutionPreset.name,
         'fitMode': _settings.post.fitMode.name,
-        'path': originalPath,
+        'projectPath': projectPath,
         'padding': _videoPadding,
         'cornerRadius': _videoRadius,
         'backgroundColor': _backgroundColor,

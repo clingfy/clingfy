@@ -1461,9 +1461,12 @@ final class InlinePreviewView: NSView {
       currentMediaSources
       ?? currentScene?.mediaSources
       ?? PreviewMediaSources(
+        projectPath: currentVideoPath ?? "",
         screenPath: currentVideoPath ?? "",
         cameraPath: nil,
-        metadataPath: nil
+        metadataPath: nil,
+        cursorPath: nil,
+        zoomManualPath: nil
       )
     let scene = PreviewScene(
       mediaSources: mediaSources,

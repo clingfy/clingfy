@@ -418,8 +418,7 @@ final class LetterboxExporter {
   }
 
   func export(
-    inputURL: URL,
-    cameraInputURL: URL? = nil,
+    project: RecordingProjectRef,
     target: CGSize,
     padding: Double = 0,
     cornerRadius: Double = 0,
@@ -448,13 +447,17 @@ final class LetterboxExporter {
     cancel()
     isCancelled = false
 
+    let mediaSources = project.mediaSources()
+    let inputURL = mediaSources.screenVideoURL
+    let cameraInputURL = mediaSources.cameraVideoURL
+
     let asset = AVAsset(url: inputURL)
 
     // Load cursor recording if needed (gracefully handle missing cursor file)
     var cursorRecording: CursorRecording?
     if showCursor {
-      let cursorDataURL = AppPaths.cursorSidecarURL(for: inputURL)
-      if let data = try? Data(contentsOf: cursorDataURL),
+      if let cursorDataURL = mediaSources.cursorDataURL,
+        let data = try? Data(contentsOf: cursorDataURL),
         let recording = try? JSONDecoder().decode(CursorRecording.self, from: data)
       {
         cursorRecording = recording
@@ -465,16 +468,16 @@ final class LetterboxExporter {
         // Cursor file missing - this is OK, we just proceed without cursor overlay
         NativeLogger.i(
           "Export", "Cursor data missing or invalid, proceeding without cursor overlay",
-          context: ["expectedPath": cursorDataURL.lastPathComponent])
+          context: ["expectedPath": mediaSources.cursorPath ?? "nil"])
       }
     }
 
     // Load manual segments
-    let manualURL = AppPaths.zoomManualSidecarURL(for: inputURL)
     var manualSegments: [ZoomTimelineSegment] = []
     var overriddenAutoIds: Set<String> = []
 
-    if let data = try? Data(contentsOf: manualURL),
+    if let manualURL = mediaSources.zoomManualURL,
+      let data = try? Data(contentsOf: manualURL),
       let manualData = try? JSONDecoder().decode(ZoomManualData.self, from: data)
     {
       let allManual = manualData.segments
@@ -543,6 +546,7 @@ final class LetterboxExporter {
     NativeLogger.i(
       "Export", "Export resolved",
       context: [
+        "projectPath": project.rootURL.path,
         "input": inputURL.path,
         "output": outputURL.path,
         "target": "\(Int(target.width))x\(Int(target.height))",

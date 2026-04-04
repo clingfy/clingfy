@@ -89,7 +89,7 @@ void main() {
     await _emitWorkflowEvent({
       'type': 'recordingFinalized',
       'sessionId': generatedSessionId,
-      'path': '/tmp/demo.mov',
+      'projectPath': '/tmp/demo.clingfy',
     });
     await recording.handlePreviewHostMounted();
     await _emitWorkflowEvent({

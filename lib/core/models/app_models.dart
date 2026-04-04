@@ -363,6 +363,7 @@ class CameraExportCapabilities {
 
 class RecordingSceneInfo {
   const RecordingSceneInfo({
+    required this.projectPath,
     required this.screenPath,
     this.cameraPath,
     this.metadataPath,
@@ -371,6 +372,7 @@ class RecordingSceneInfo {
         const CameraExportCapabilities.allSupported(),
   });
 
+  final String projectPath;
   final String screenPath;
   final String? cameraPath;
   final String? metadataPath;
@@ -381,6 +383,7 @@ class RecordingSceneInfo {
 
   factory RecordingSceneInfo.fromMap(Map<dynamic, dynamic> raw) {
     return RecordingSceneInfo(
+      projectPath: raw['projectPath']?.toString() ?? '',
       screenPath: raw['screenPath']?.toString() ?? '',
       cameraPath: raw['cameraPath']?.toString(),
       metadataPath: raw['metadataPath']?.toString(),
@@ -455,7 +458,7 @@ class RecordingWorkflowState {
   const RecordingWorkflowState({
     required this.phase,
     this.sessionId,
-    this.finalizedRecordingPath,
+    this.projectPath,
     this.previewPath,
     this.previewToken,
     this.errorCode,
@@ -465,7 +468,7 @@ class RecordingWorkflowState {
   const RecordingWorkflowState.idle()
     : phase = WorkflowPhase.idle,
       sessionId = null,
-      finalizedRecordingPath = null,
+      projectPath = null,
       previewPath = null,
       previewToken = null,
       errorCode = null,
@@ -473,7 +476,7 @@ class RecordingWorkflowState {
 
   final WorkflowPhase phase;
   final String? sessionId;
-  final String? finalizedRecordingPath;
+  final String? projectPath;
   final String? previewPath;
   final String? previewToken;
   final String? errorCode;
@@ -487,8 +490,8 @@ class RecordingWorkflowState {
     WorkflowPhase? phase,
     String? sessionId,
     bool clearSessionId = false,
-    String? finalizedRecordingPath,
-    bool clearFinalizedRecordingPath = false,
+    String? projectPath,
+    bool clearProjectPath = false,
     String? previewPath,
     bool clearPreviewPath = false,
     String? previewToken,
@@ -501,9 +504,9 @@ class RecordingWorkflowState {
     return RecordingWorkflowState(
       phase: phase ?? this.phase,
       sessionId: clearSessionId ? null : (sessionId ?? this.sessionId),
-      finalizedRecordingPath: clearFinalizedRecordingPath
+      projectPath: clearProjectPath
           ? null
-          : (finalizedRecordingPath ?? this.finalizedRecordingPath),
+          : (projectPath ?? this.projectPath),
       previewPath: clearPreviewPath ? null : (previewPath ?? this.previewPath),
       previewToken: clearPreviewToken
           ? null

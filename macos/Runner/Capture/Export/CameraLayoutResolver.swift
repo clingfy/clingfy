@@ -2,9 +2,12 @@ import CoreGraphics
 import Foundation
 
 struct PreviewMediaSources: Equatable {
+  let projectPath: String
   let screenPath: String
   let cameraPath: String?
   let metadataPath: String?
+  let cursorPath: String?
+  let zoomManualPath: String?
 }
 
 struct CameraCompositionParams: Equatable {

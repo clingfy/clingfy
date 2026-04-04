@@ -44,12 +44,11 @@ class RecordingController extends ChangeNotifier {
   RecordingWorkflowState get state => _state;
   WorkflowPhase get phase => _state.phase;
   String? get sessionId => _state.sessionId;
-  String? get finalizedRecordingPath => _state.finalizedRecordingPath;
-  String? get previewPath =>
-      _state.previewPath ?? _state.finalizedRecordingPath;
+  String? get projectPath => _state.projectPath;
+  String? get previewPath => _state.previewPath ?? _state.projectPath;
   String? get previewToken => _state.previewToken;
   String? get lastRecordingPath => previewPath;
-  String? get originalRecordingPath => _state.finalizedRecordingPath;
+  String? get originalRecordingPath => _state.projectPath;
   String? get errorCode => _state.errorCode;
   String? get errorMessage => _state.errorMessage ?? _state.errorCode;
 
@@ -417,7 +416,7 @@ class RecordingController extends ChangeNotifier {
 
   Future<void> handlePreviewHostMounted() async {
     final activeSessionId = _state.sessionId;
-    final path = _state.previewPath ?? _state.finalizedRecordingPath;
+    final path = _state.previewPath ?? _state.projectPath;
     Log.d('Recording', 'Preview host mounted', null, null, {
       'phase': phase.name,
       'sessionId': activeSessionId,
@@ -447,7 +446,10 @@ class RecordingController extends ChangeNotifier {
         'Recording',
         'Invoking native previewOpen for session $activeSessionId',
       );
-      await _nativeBridge.previewOpen(sessionId: activeSessionId, path: path);
+      await _nativeBridge.previewOpen(
+        sessionId: activeSessionId,
+        projectPath: path,
+      );
     } catch (e, st) {
       Log.e("Recording", "Failed to open preview: $e", e, st);
       _state = _state.copyWith(
@@ -648,21 +650,21 @@ class RecordingController extends ChangeNotifier {
       return;
     }
 
-    final path = event['path']?.toString();
-    if (path == null || path.isEmpty) {
+    final projectPath = event['projectPath']?.toString();
+    if (projectPath == null || projectPath.isEmpty) {
       _handleRecordingFailedEvent({
         'type': 'recordingFailed',
         'sessionId': eventSessionId,
         'stage': 'finalize',
         'code': 'RECORDING_FINALIZE_ERROR',
-        'error': 'Missing finalized recording path',
+        'error': 'Missing finalized project path',
       });
       return;
     }
 
     Log.i(
       'Recording',
-      'Recording finalized for session $eventSessionId, opening preview shell for $path',
+      'Recording finalized for session $eventSessionId, opening preview shell for $projectPath',
     );
     _pauseResumeInFlight = false;
     _stopElapsedTicker();
@@ -674,8 +676,8 @@ class RecordingController extends ChangeNotifier {
     _setState(
       _state.copyWith(
         phase: WorkflowPhase.openingPreview,
-        finalizedRecordingPath: path,
-        previewPath: path,
+        projectPath: projectPath,
+        previewPath: projectPath,
         clearPreviewToken: true,
         clearErrorCode: true,
         clearErrorMessage: true,
@@ -718,7 +720,7 @@ class RecordingController extends ChangeNotifier {
         previewPath:
             event['path']?.toString() ??
             _state.previewPath ??
-            _state.finalizedRecordingPath,
+            _state.projectPath,
         previewToken: event['token']?.toString(),
         clearErrorCode: true,
         clearErrorMessage: true,
@@ -743,7 +745,7 @@ class RecordingController extends ChangeNotifier {
         previewPath:
             event['path']?.toString() ??
             _state.previewPath ??
-            _state.finalizedRecordingPath,
+            _state.projectPath,
         previewToken: event['token']?.toString(),
         clearErrorCode: true,
         clearErrorMessage: true,

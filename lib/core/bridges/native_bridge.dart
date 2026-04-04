@@ -311,7 +311,7 @@ class NativeBridge {
     try {
       final List? results = await _nativeBridge.invokeMethod<List>(
         'getZoomSegments',
-        {'videoPath': videoPath},
+        {'projectPath': videoPath},
       );
       if (results == null) return [];
       return results.map((m) => ZoomSegment.fromMap(m as Map)).toList();
@@ -325,7 +325,7 @@ class NativeBridge {
     try {
       final List? results = await _nativeBridge.invokeMethod<List>(
         'getManualZoomSegments',
-        {'videoPath': videoPath},
+        {'projectPath': videoPath},
       );
       if (results == null) return [];
       return results
@@ -345,7 +345,7 @@ class NativeBridge {
       final bool? success = await _nativeBridge.invokeMethod<bool>(
         'saveManualZoomSegments',
         {
-          'videoPath': videoPath,
+          'projectPath': videoPath,
           'segments': segments.map((s) => s.toMap()).toList(),
         },
       );
@@ -409,23 +409,23 @@ class NativeBridge {
 
   Future<void> previewOpen({
     required String sessionId,
-    required String path,
+    required String projectPath,
     String? cameraPath,
   }) async {
     await _nativeBridge.invokeMethod<void>('previewOpen', {
       'sessionId': sessionId,
-      'path': path,
+      'projectPath': projectPath,
       if (cameraPath != null) 'cameraPath': cameraPath,
     });
   }
 
-  Future<RecordingSceneInfo> getRecordingSceneInfo(String path) async {
+  Future<RecordingSceneInfo> getRecordingSceneInfo(String projectPath) async {
     final raw = await _nativeBridge.invokeMethod<Map<dynamic, dynamic>>(
       'getRecordingSceneInfo',
-      {'path': path},
+      {'projectPath': projectPath},
     );
     if (raw == null) {
-      return RecordingSceneInfo(screenPath: path);
+      return RecordingSceneInfo(projectPath: projectPath, screenPath: projectPath);
     }
     return RecordingSceneInfo.fromMap(raw);
   }

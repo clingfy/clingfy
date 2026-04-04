@@ -221,7 +221,7 @@ struct RecordingMetadata: Codable {
   var editorSeed: EditorSeed
 
   static func create(
-    rawURL: URL,
+    screenRawRelativePath: String,
     displayMode: DisplayTargetMode,
     displayID: CGDirectDisplayID,
     cropRect: CGRect?,
@@ -242,7 +242,7 @@ struct RecordingMetadata: Codable {
       startedAt: recordingISO8601String(from: Date()),
       endedAt: nil,
       screen: ScreenCaptureInfo(
-        rawRelativePath: rawURL.lastPathComponent,
+        rawRelativePath: screenRawRelativePath,
         displayMode: displayMode.rawValue,
         displayId: displayID,
         windowId: windowID.map { UInt32($0) },
@@ -253,6 +253,36 @@ struct RecordingMetadata: Codable {
         cursorLinked: cursorLinked,
         excludedRecorderApp: excludedRecorderApp
       ),
+      camera: camera,
+      editorSeed: editorSeed
+    )
+  }
+
+  static func create(
+    rawURL: URL,
+    displayMode: DisplayTargetMode,
+    displayID: CGDirectDisplayID,
+    cropRect: CGRect?,
+    frameRate: Int,
+    quality: RecordingQuality,
+    cursorEnabled: Bool,
+    cursorLinked: Bool,
+    windowID: CGWindowID?,
+    excludedRecorderApp: Bool,
+    camera: CameraCaptureInfo?,
+    editorSeed: EditorSeed
+  ) -> RecordingMetadata {
+    create(
+      screenRawRelativePath: rawURL.lastPathComponent,
+      displayMode: displayMode,
+      displayID: displayID,
+      cropRect: cropRect,
+      frameRate: frameRate,
+      quality: quality,
+      cursorEnabled: cursorEnabled,
+      cursorLinked: cursorLinked,
+      windowID: windowID,
+      excludedRecorderApp: excludedRecorderApp,
       camera: camera,
       editorSeed: editorSeed
     )
@@ -346,7 +376,11 @@ private extension RecordingMetadata {
     let fileName = url.lastPathComponent
     if fileName.hasSuffix(".meta.json") {
       let trimmed = String(fileName.dropLast(".meta.json".count))
-      return "\(trimmed).mov"
+      let movieName = "\(trimmed).mov"
+      if url.deletingLastPathComponent().lastPathComponent == RecordingProjectPaths.captureDirectoryName {
+        return "\(RecordingProjectPaths.captureDirectoryName)/\(movieName)"
+      }
+      return movieName
     }
     return url.deletingPathExtension().lastPathComponent
   }

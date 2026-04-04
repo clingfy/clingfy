@@ -4,15 +4,12 @@ import XCTest
 @testable import Clingfy
 
 final class RecordingFailureRecoveryTests: XCTestCase {
-  func testCaptureDestinationUsesInProgressURLWhenSessionIsActive() {
-    let session = RecordingFileSession(
-      finalRawURL: URL(fileURLWithPath: "/tmp/final.mov"),
-      inProgressRawURL: URL(fileURLWithPath: "/tmp/inprogress.mov")
-    )
+  func testCaptureDestinationUsesProjectScreenURLWhenProjectIsActive() {
+    let projectRoot = URL(fileURLWithPath: "/tmp/demo.clingfy", isDirectory: true)
 
     XCTAssertEqual(
-      CaptureDestinationDiagnostics.url(for: session).standardizedFileURL,
-      session.inProgressRawURL.standardizedFileURL
+      CaptureDestinationDiagnostics.url(for: projectRoot).standardizedFileURL,
+      RecordingProjectPaths.screenVideoURL(for: projectRoot).standardizedFileURL
     )
   }
 
@@ -23,76 +20,86 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     )
   }
 
-  func testPromotionPlanPrefersInProgressRawWhenPresent() {
-    let session = RecordingFileSession(
-      finalRawURL: URL(fileURLWithPath: "/tmp/final.mov"),
-      inProgressRawURL: URL(fileURLWithPath: "/tmp/inprogress.mov")
-    )
-    let recordedRawURL = URL(fileURLWithPath: "/tmp/backend.mov")
+  func testRecordingStoreMarksInterruptedProjectsAsFailed() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
 
-    let plan = RecordingArtifactPromotionPlan.make(
-      session: session,
-      recordedRawURL: recordedRawURL,
-      fileExists: { $0 == session.inProgressRawURL }
-    )
-
-    XCTAssertEqual(plan.sourceRawURL, session.inProgressRawURL)
-    XCTAssertEqual(plan.finalRawURL, session.finalRawURL)
-  }
-
-  func testPromotionPlanFallsBackToRecordedRawWhenInProgressMissing() {
-    let session = RecordingFileSession(
-      finalRawURL: URL(fileURLWithPath: "/tmp/final.mov"),
-      inProgressRawURL: URL(fileURLWithPath: "/tmp/inprogress.mov")
-    )
-    let recordedRawURL = URL(fileURLWithPath: "/tmp/backend.mov")
-
-    let plan = RecordingArtifactPromotionPlan.make(
-      session: session,
-      recordedRawURL: recordedRawURL,
-      fileExists: { _ in false }
-    )
-
-    XCTAssertEqual(plan.sourceRawURL, recordedRawURL)
-    XCTAssertEqual(plan.finalRawURL, session.finalRawURL)
-  }
-
-  func testRecordingArtifactPromoterMovesRawAndSidecarsToFinalRecording() throws {
-    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
     let fileManager = FileManager.default
-    try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
-    defer { try? fileManager.removeItem(at: rootURL) }
+    let interruptedRoot = rootURL.appendingPathComponent("rec_interrupted.clingfy", isDirectory: true)
+    let readyRoot = rootURL.appendingPathComponent("rec_ready.clingfy", isDirectory: true)
 
-    let session = RecordingFileSession(
-      finalRawURL: rootURL.appendingPathComponent("final.mov"),
-      inProgressRawURL: rootURL.appendingPathComponent("temp.inprogress.mov")
+    try createProjectSkeleton(at: interruptedRoot, projectId: "rec_interrupted")
+    try createProjectSkeleton(at: readyRoot, projectId: "rec_ready")
+
+    var interrupted = try RecordingProjectManifest.read(
+      from: RecordingProjectPaths.manifestURL(for: interruptedRoot)
     )
-    let recordedRawURL = rootURL.appendingPathComponent("backend.mov")
+    interrupted.updateStatus(.capturing)
+    try interrupted.write(to: RecordingProjectPaths.manifestURL(for: interruptedRoot))
 
-    try Data("raw".utf8).write(to: session.inProgressRawURL)
-    try Data("cursor".utf8).write(to: AppPaths.cursorSidecarURL(for: session.inProgressRawURL))
-    try Data("meta".utf8).write(to: AppPaths.metadataSidecarURL(for: session.inProgressRawURL))
+    var ready = try RecordingProjectManifest.read(
+      from: RecordingProjectPaths.manifestURL(for: readyRoot)
+    )
+    ready.updateStatus(.ready)
+    try ready.write(to: RecordingProjectPaths.manifestURL(for: readyRoot))
 
-    let promotedURL = try RecordingArtifactPromoter.promote(
-      session: session,
-      recordedRawURL: recordedRawURL,
+    let store = RecordingStore(rootURL: rootURL, fileManager: fileManager)
+    store.markInterruptedProjectsAsFailed()
+
+    let updatedInterrupted = try RecordingProjectManifest.read(
+      from: RecordingProjectPaths.manifestURL(for: interruptedRoot)
+    )
+    let updatedReady = try RecordingProjectManifest.read(
+      from: RecordingProjectPaths.manifestURL(for: readyRoot)
+    )
+
+    XCTAssertEqual(updatedInterrupted.status, .failed)
+    XCTAssertEqual(updatedReady.status, .ready)
+  }
+
+  func testLegacyWorkspaceResetWipesFlatArtifactsAndCreatesSentinel() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    let fileManager = FileManager.default
+    let legacyVideo = rootURL.appendingPathComponent("legacy.mov")
+    let legacyMetadata = rootURL.appendingPathComponent("legacy.meta.json")
+    try Data("video".utf8).write(to: legacyVideo)
+    try Data("metadata".utf8).write(to: legacyMetadata)
+
+    let didReset = RecordingProjectPaths.performOneTimeLegacyWorkspaceResetIfNeeded(
+      isNonProductionBuild: true,
+      rootURL: rootURL,
       fileManager: fileManager
     )
 
-    XCTAssertEqual(promotedURL.standardizedFileURL, session.finalRawURL.standardizedFileURL)
-    XCTAssertTrue(fileManager.fileExists(atPath: session.finalRawURL.path))
-    XCTAssertTrue(fileManager.fileExists(atPath: AppPaths.cursorSidecarURL(for: session.finalRawURL).path))
-    XCTAssertTrue(fileManager.fileExists(atPath: AppPaths.metadataSidecarURL(for: session.finalRawURL).path))
-    XCTAssertFalse(fileManager.fileExists(atPath: session.inProgressRawURL.path))
-    XCTAssertFalse(
-      fileManager.fileExists(atPath: AppPaths.cursorSidecarURL(for: session.inProgressRawURL).path)
-    )
-    XCTAssertFalse(
+    XCTAssertTrue(didReset)
+    XCTAssertFalse(fileManager.fileExists(atPath: legacyVideo.path))
+    XCTAssertFalse(fileManager.fileExists(atPath: legacyMetadata.path))
+    XCTAssertTrue(
       fileManager.fileExists(
-        atPath: AppPaths.metadataSidecarURL(for: session.inProgressRawURL).path
+        atPath: RecordingProjectPaths.schemaSentinelURL(rootURL: rootURL).path
       )
     )
+  }
+
+  func testLegacyWorkspaceResetOnlyRunsOnceWhenSentinelExists() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    let fileManager = FileManager.default
+    try RecordingProjectPaths.ensureSchemaSentinel(rootURL: rootURL, fileManager: fileManager)
+    let legacyVideo = rootURL.appendingPathComponent("legacy.mov")
+    try Data("video".utf8).write(to: legacyVideo)
+
+    let didReset = RecordingProjectPaths.performOneTimeLegacyWorkspaceResetIfNeeded(
+      isNonProductionBuild: true,
+      rootURL: rootURL,
+      fileManager: fileManager
+    )
+
+    XCTAssertFalse(didReset)
+    XCTAssertTrue(fileManager.fileExists(atPath: legacyVideo.path))
   }
 
   func testTerminalCompletionGuardSuppressesDuplicatesUntilReset() {
@@ -115,7 +122,10 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     )
 
     XCTAssertTrue(plan.shouldFlushCursor)
-    XCTAssertEqual(plan.cursorURL, AppPaths.cursorSidecarURL(for: recordingURL))
+    XCTAssertEqual(
+      plan.cursorURL,
+      recordingURL.deletingPathExtension().appendingPathExtension("cursor.json")
+    )
   }
 
   func testCursorFailurePlanSkipsFlushWithoutURLOrInactiveCursorCapture() {
@@ -203,8 +213,7 @@ final class RecordingFailureRecoveryTests: XCTestCase {
   }
 
   func testStorageInfoProviderBuildSnapshotAggregatesRecordingTempAndLogs() throws {
-    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let rootURL = makeTemporaryDirectory()
     let recordingsURL = rootURL.appendingPathComponent("recordings", isDirectory: true)
     let tempURL = rootURL.appendingPathComponent("temp", isDirectory: true)
     let logsURL = rootURL.appendingPathComponent("logs", isDirectory: true)
@@ -237,9 +246,8 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(snapshot.logsBytes, Int64(logsData.count))
   }
 
-  func testRecordingStoreDeleteAllOnlyRemovesFilesFromRecordingsWorkspace() throws {
-    let rootURL = URL(fileURLWithPath: NSTemporaryDirectory())
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  func testRecordingStoreDeleteAllOnlyRemovesProjectsFromRecordingsWorkspace() throws {
+    let rootURL = makeTemporaryDirectory()
     let recordingsURL = rootURL.appendingPathComponent("recordings", isDirectory: true)
     let tempURL = rootURL.appendingPathComponent("temp", isDirectory: true)
     let logsURL = rootURL.appendingPathComponent("logs", isDirectory: true)
@@ -250,15 +258,11 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     try fileManager.createDirectory(at: logsURL, withIntermediateDirectories: true)
     defer { try? fileManager.removeItem(at: rootURL) }
 
-    let rawURL = recordingsURL.appendingPathComponent("clip.mov")
-    let cursorURL = AppPaths.cursorSidecarURL(for: rawURL)
-    let metaURL = AppPaths.metadataSidecarURL(for: rawURL)
+    let projectRoot = recordingsURL.appendingPathComponent("clip.clingfy", isDirectory: true)
+    try createProjectSkeleton(at: projectRoot, projectId: "clip")
     let tempArtifactURL = tempURL.appendingPathComponent("capture.inprogress.mov")
     let logURL = logsURL.appendingPathComponent("logs_2026-03-25.jsonl")
 
-    try Data("raw".utf8).write(to: rawURL)
-    try Data("cursor".utf8).write(to: cursorURL)
-    try Data("meta".utf8).write(to: metaURL)
     try Data("temp".utf8).write(to: tempArtifactURL)
     try Data("log".utf8).write(to: logURL)
 
@@ -266,9 +270,7 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     let deletedCount = store.deleteAll()
 
     XCTAssertEqual(deletedCount, 1)
-    XCTAssertFalse(fileManager.fileExists(atPath: rawURL.path))
-    XCTAssertFalse(fileManager.fileExists(atPath: cursorURL.path))
-    XCTAssertFalse(fileManager.fileExists(atPath: metaURL.path))
+    XCTAssertFalse(fileManager.fileExists(atPath: projectRoot.path))
     XCTAssertTrue(fileManager.fileExists(atPath: tempArtifactURL.path))
     XCTAssertTrue(fileManager.fileExists(atPath: logURL.path))
   }
@@ -318,5 +320,40 @@ final class RecordingFailureRecoveryTests: XCTestCase {
       ),
       .belowCriticalThreshold
     )
+  }
+
+  private func makeTemporaryDirectory() -> URL {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+  }
+
+  private func createProjectSkeleton(at projectRoot: URL, projectId: String) throws {
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.captureDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.cameraSegmentsDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.postDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.derivedDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+
+    let manifest = RecordingProjectManifest.create(
+      projectId: projectId,
+      displayName: "Clingfy Test",
+      includeCamera: false
+    )
+    try manifest.write(to: RecordingProjectPaths.manifestURL(for: projectRoot))
   }
 }

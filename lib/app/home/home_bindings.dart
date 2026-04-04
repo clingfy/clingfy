@@ -64,19 +64,19 @@ class HomeBindings {
     final state = recordingController.state;
     if (state.phase == WorkflowPhase.openingPreview &&
         state.sessionId != null &&
-        state.finalizedRecordingPath != null &&
+        state.projectPath != null &&
         _attachedRecordingSessionId != state.sessionId) {
       _attachedRecordingSessionId = state.sessionId;
       postProcessingController.attachToRecording(
         sessionId: state.sessionId!,
-        sourcePath: state.finalizedRecordingPath!,
+        projectPath: state.projectPath!,
       );
       unawaited(
         postProcessingController.prepareInitialPreview(
           sessionId: state.sessionId!,
         ),
       );
-      unawaited(onRecordingFinalized(state.finalizedRecordingPath!));
+      unawaited(onRecordingFinalized(state.projectPath!));
     } else if (state.phase == WorkflowPhase.idle &&
         _attachedRecordingSessionId != null) {
       _attachedRecordingSessionId = null;

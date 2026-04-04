@@ -1,30 +1,20 @@
 import Foundation
 
 /// Manages the internal recordings workspace: discovery, cleanup, and deletion.
-///
-/// This class provides:
-/// - Enumeration of raw recordings in the internal workspace
-/// - Deletion of raw recordings and their sidecars
-/// - Age-based cleanup policies
-/// - Startup scanning for diagnostics
 final class RecordingStore {
-
-  /// Information about a recording in the internal workspace.
   struct RecordingInfo {
-    let rawURL: URL
-    let cursorURL: URL
-    let metaURL: URL
-    let hasCursor: Bool
-    let hasMeta: Bool
+    let projectRootURL: URL
+    let manifestURL: URL
+    let manifest: RecordingProjectManifest?
+    let screenVideoURL: URL?
+    let metadataURL: URL?
     let createdAt: Date?
-    let metadata: RecordingMetadata?
   }
 
-  /// Result of a startup scan.
   struct ScanResult {
     let totalCount: Int
-    let completeCount: Int  // has both cursor and meta
-    let orphanedCount: Int  // missing cursor or meta
+    let completeCount: Int
+    let orphanedCount: Int
     let oldestDate: Date?
     let totalSizeBytes: UInt64
     let recordings: [RecordingInfo]
@@ -33,60 +23,49 @@ final class RecordingStore {
   private let fm: FileManager
   private let rootURL: URL
 
-  init(rootURL: URL = AppPaths.recordingsRoot(), fileManager: FileManager = .default) {
+  init(rootURL: URL = RecordingProjectPaths.projectsRoot(), fileManager: FileManager = .default) {
     self.rootURL = rootURL
     self.fm = fileManager
   }
 
-  // MARK: - Discovery
-
-  /// Lists all raw recordings (.mov files) in the internal workspace.
   func listRecordings() -> [RecordingInfo] {
     guard
       let contents = try? fm.contentsOfDirectory(
         at: rootURL,
-        includingPropertiesForKeys: [.creationDateKey, .fileSizeKey]
+        includingPropertiesForKeys: [.creationDateKey, .isDirectoryKey],
+        options: [.skipsHiddenFiles]
       )
     else {
       return []
     }
 
     return contents
-      .filter { rawURL in
-        guard rawURL.pathExtension.lowercased() == "mov" else { return false }
-        let name = rawURL.lastPathComponent.lowercased()
-        return !name.contains(".camera.") && !name.contains(".segment-") && !name.contains("segment_")
-      }
-      .map { rawURL in
-        let cursorURL = AppPaths.cursorSidecarURL(for: rawURL)
-        let metaURL = AppPaths.metadataSidecarURL(for: rawURL)
-        let hasCursor = fm.fileExists(atPath: cursorURL.path)
-        let hasMeta = fm.fileExists(atPath: metaURL.path)
-
-        let createdAt: Date? = {
-          let values = try? rawURL.resourceValues(forKeys: [.creationDateKey])
-          return values?.creationDate
-        }()
-
-        let metadata: RecordingMetadata? = {
-          guard hasMeta else { return nil }
-          return try? RecordingMetadata.read(from: metaURL)
-        }()
+      .filter(RecordingProjectPaths.isProjectDirectory)
+      .map { projectRootURL in
+        let manifestURL = RecordingProjectPaths.manifestURL(for: projectRootURL)
+        let manifest = try? RecordingProjectManifest.read(from: manifestURL)
+        let screenVideoURL = manifest.flatMap {
+          RecordingProjectPaths.resolvedURL(for: $0.capture.screenVideo, projectRoot: projectRootURL)
+        }
+        let metadataURL = manifest.flatMap {
+          RecordingProjectPaths.resolvedURL(for: $0.capture.screenMetadata, projectRoot: projectRootURL)
+        }
+        let createdAt =
+          manifest?.createdAt
+          ?? (try? projectRootURL.resourceValues(forKeys: [.creationDateKey]).creationDate)
 
         return RecordingInfo(
-          rawURL: rawURL,
-          cursorURL: cursorURL,
-          metaURL: metaURL,
-          hasCursor: hasCursor,
-          hasMeta: hasMeta,
-          createdAt: createdAt,
-          metadata: metadata
+          projectRootURL: projectRootURL,
+          manifestURL: manifestURL,
+          manifest: manifest,
+          screenVideoURL: screenVideoURL,
+          metadataURL: metadataURL,
+          createdAt: createdAt
         )
       }
       .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
   }
 
-  /// Scans the internal workspace and returns statistics.
   func scanWorkspace() -> ScanResult {
     let recordings = listRecordings()
 
@@ -96,29 +75,21 @@ final class RecordingStore {
     var oldestDate: Date?
 
     for recording in recordings {
-      // Calculate size
-      if let size = try? fm.attributesOfItem(atPath: recording.rawURL.path)[.size] as? UInt64 {
-        totalSize += size
-      }
-      if recording.hasCursor, let size = try? fm.attributesOfItem(atPath: recording.cursorURL.path)[.size] as? UInt64 {
-        totalSize += size
-      }
-      if recording.hasMeta, let size = try? fm.attributesOfItem(atPath: recording.metaURL.path)[.size] as? UInt64 {
-        totalSize += size
-      }
+      totalSize += UInt64(StorageInfoProvider.directorySize(recording.projectRootURL))
 
-      // Check completeness
-      if recording.hasCursor && recording.hasMeta {
+      let isComplete =
+        recording.manifest != nil
+        && recording.screenVideoURL.map { fm.fileExists(atPath: $0.path) } == true
+        && recording.metadataURL.map { fm.fileExists(atPath: $0.path) } == true
+
+      if isComplete {
         completeCount += 1
       } else {
         orphanedCount += 1
       }
 
-      // Track oldest
-      if let created = recording.createdAt {
-        if oldestDate == nil || created < oldestDate! {
-          oldestDate = created
-        }
+      if let created = recording.createdAt, oldestDate == nil || created < oldestDate! {
+        oldestDate = created
       }
     }
 
@@ -132,55 +103,34 @@ final class RecordingStore {
     )
   }
 
-  // MARK: - Deletion
-
-  /// Deletes a raw recording and all its sidecars.
-  ///
-  /// - Parameter rawURL: The URL of the raw .mov file
-  /// - Returns: true if at least the raw file was deleted
   @discardableResult
-  func deleteRawAndSidecars(rawURL: URL) -> Bool {
-    var deletedRaw = false
-
-    // Delete raw .mov
-    if fm.fileExists(atPath: rawURL.path) {
-      do {
-        try fm.removeItem(at: rawURL)
-        deletedRaw = true
-        NativeLogger.d("RecordingStore", "Deleted raw recording", context: ["path": rawURL.lastPathComponent])
-      } catch {
-        NativeLogger.e("RecordingStore", "Failed to delete raw recording", context: ["error": error.localizedDescription])
-      }
+  func deleteProject(projectRootURL: URL) -> Bool {
+    guard RecordingProjectPaths.isProjectDirectory(projectRootURL) else {
+      return false
     }
 
-    // Delete related artifacts (best-effort).
-    for artifactURL in AppPaths.allRecordingArtifactURLs(for: rawURL) where artifactURL != rawURL {
-      if !fm.fileExists(atPath: artifactURL.path) {
-        continue
-      }
-      do {
-        try fm.removeItem(at: artifactURL)
-        NativeLogger.d(
-          "RecordingStore",
-          "Deleted related recording artifact",
-          context: ["path": artifactURL.lastPathComponent]
-        )
-      } catch {
-        NativeLogger.w(
-          "RecordingStore",
-          "Failed to delete related artifact",
-          context: ["error": error.localizedDescription, "path": artifactURL.lastPathComponent]
-        )
-      }
+    if !fm.fileExists(atPath: projectRootURL.path) {
+      return false
     }
 
-    return deletedRaw
+    do {
+      try fm.removeItem(at: projectRootURL)
+      NativeLogger.d(
+        "RecordingStore",
+        "Deleted recording project",
+        context: ["path": projectRootURL.lastPathComponent]
+      )
+      return true
+    } catch {
+      NativeLogger.e(
+        "RecordingStore",
+        "Failed to delete recording project",
+        context: ["path": projectRootURL.path, "error": error.localizedDescription]
+      )
+      return false
+    }
   }
 
-  /// Deletes all recordings older than the specified number of days.
-  ///
-  /// - Parameter days: Number of days after which recordings are considered old
-  /// - Returns: Number of recordings deleted
   @discardableResult
   func deleteOlderThan(days: Int) -> Int {
     let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
@@ -188,65 +138,77 @@ final class RecordingStore {
 
     for recording in listRecordings() {
       guard let created = recording.createdAt, created < cutoff else { continue }
-      if deleteRawAndSidecars(rawURL: recording.rawURL) {
+      if deleteProject(projectRootURL: recording.projectRootURL) {
         deletedCount += 1
       }
     }
 
     if deletedCount > 0 {
-      NativeLogger.i("RecordingStore", "Cleanup completed", context: [
-        "deletedCount": deletedCount,
-        "olderThanDays": days
-      ])
+      NativeLogger.i(
+        "RecordingStore",
+        "Cleanup completed",
+        context: ["deletedCount": deletedCount, "olderThanDays": days]
+      )
     }
 
     return deletedCount
   }
 
-  /// Deletes all recordings in the internal workspace.
-  ///
-  /// - Returns: Number of recordings deleted
   @discardableResult
   func deleteAll() -> Int {
     var deletedCount = 0
     for recording in listRecordings() {
-      if deleteRawAndSidecars(rawURL: recording.rawURL) {
+      if deleteProject(projectRootURL: recording.projectRootURL) {
         deletedCount += 1
       }
     }
     return deletedCount
   }
 
-  // MARK: - Cleanup After Export
-
-  /// Cleans up the raw recording and sidecars after a successful export.
-  ///
-  /// This method only deletes files if:
-  /// - `keepOriginals` is false
-  /// - The raw URL is in the internal workspace (safety check)
-  ///
-  /// - Parameters:
-  ///   - rawURL: The URL of the raw recording that was exported
-  ///   - keepOriginals: If true, files are preserved; if false, they are deleted
-  func cleanupAfterExport(rawURL: URL, keepOriginals: Bool) {
+  func cleanupAfterExport(projectRootURL: URL, keepOriginals: Bool) {
     guard !keepOriginals else {
-      NativeLogger.d("RecordingStore", "Keeping original files after export", context: ["path": rawURL.lastPathComponent])
+      NativeLogger.d(
+        "RecordingStore",
+        "Keeping recording project after export",
+        context: ["path": projectRootURL.lastPathComponent]
+      )
       return
     }
 
-    // Safety check: only delete files in the internal workspace
-    guard AppPaths.isInternalRecording(rawURL) else {
-      NativeLogger.w("RecordingStore", "Skipping cleanup: file not in internal workspace", context: ["path": rawURL.path])
+    guard AppPaths.isInternalRecording(projectRootURL) else {
+      NativeLogger.w(
+        "RecordingStore",
+        "Skipping cleanup: project not in internal workspace",
+        context: ["path": projectRootURL.path]
+      )
       return
     }
 
-    deleteRawAndSidecars(rawURL: rawURL)
-    NativeLogger.i("RecordingStore", "Cleaned up after export", context: ["path": rawURL.lastPathComponent])
+    _ = deleteProject(projectRootURL: projectRootURL)
+    NativeLogger.i(
+      "RecordingStore",
+      "Cleaned up recording project after export",
+      context: ["path": projectRootURL.lastPathComponent]
+    )
   }
 
-  // MARK: - Diagnostics
+  func markInterruptedProjectsAsFailed() {
+    for recording in listRecordings() {
+      guard var manifest = recording.manifest else { continue }
+      guard manifest.status == .capturing || manifest.status == .finalizing else { continue }
+      manifest.updateStatus(.failed)
+      do {
+        try manifest.write(to: recording.manifestURL)
+      } catch {
+        NativeLogger.w(
+          "RecordingStore",
+          "Failed to mark interrupted project as failed",
+          context: ["path": recording.manifestURL.path, "error": error.localizedDescription]
+        )
+      }
+    }
+  }
 
-  /// Logs workspace statistics for diagnostics.
   func logWorkspaceStats() {
     let scan = scanWorkspace()
 
@@ -258,27 +220,22 @@ final class RecordingStore {
 
     let oldestFormatted: String = {
       guard let oldest = scan.oldestDate else { return "none" }
-      let formatter = RelativeDateTimeFormatter()
-      formatter.unitsStyle = .full
-      return formatter.localizedString(for: oldest, relativeTo: Date())
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime]
+      return formatter.string(from: oldest)
     }()
 
-    NativeLogger.i("RecordingStore", "Workspace scan complete", context: [
-      "totalRecordings": scan.totalCount,
-      "completeRecordings": scan.completeCount,
-      "orphanedRecordings": scan.orphanedCount,
-      "totalSize": sizeFormatted,
-      "oldestRecording": oldestFormatted,
-      "workspacePath": rootURL.path
-    ])
-
-    // Log orphaned recordings for debugging
-    for recording in scan.recordings where !recording.hasCursor || !recording.hasMeta {
-      NativeLogger.w("RecordingStore", "Orphaned recording found", context: [
-        "file": recording.rawURL.lastPathComponent,
-        "hasCursor": recording.hasCursor,
-        "hasMeta": recording.hasMeta
-      ])
-    }
+    NativeLogger.i(
+      "RecordingStore",
+      "Workspace scan complete",
+      context: [
+        "root": rootURL.path,
+        "totalProjects": scan.totalCount,
+        "completeProjects": scan.completeCount,
+        "orphanedProjects": scan.orphanedCount,
+        "oldest": oldestFormatted,
+        "totalSize": sizeFormatted,
+      ]
+    )
   }
 }

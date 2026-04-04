@@ -163,6 +163,7 @@ class PlayerController extends ChangeNotifier {
 
     final nextSessionId = workflow.sessionId;
     final nextPreviewPath = workflow.previewPath;
+    final nextProjectPath = workflow.projectPath;
     final workflowAllowsPreview =
         workflow.phase == WorkflowPhase.previewReady ||
         workflow.phase == WorkflowPhase.exporting;
@@ -176,8 +177,8 @@ class PlayerController extends ChangeNotifier {
       _blockingError = null;
       _blockingErrorCode = null;
       _playerReady = false;
-      if (_durMs > 0) {
-        unawaited(_attachZoomEditor(nextSessionId, nextPreviewPath));
+      if (_durMs > 0 && nextProjectPath != null) {
+        unawaited(_attachZoomEditor(nextSessionId, nextProjectPath));
       } else {
         _detachZoomEditor();
       }

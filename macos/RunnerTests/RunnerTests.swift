@@ -5,31 +5,69 @@ import XCTest
 
 @testable import Clingfy
 
-final class AppPathsTests: XCTestCase {
-  func testCameraArtifactsUseScreenRecordingStem() {
-    let rawURL = URL(fileURLWithPath: "/tmp/recording.mov")
-
-    XCTAssertEqual(AppPaths.cameraRawURL(for: rawURL).lastPathComponent, "recording.camera.mov")
-    XCTAssertEqual(
-      AppPaths.cameraMetadataSidecarURL(for: rawURL).lastPathComponent,
-      "recording.camera.meta.json"
+private func makeRecordingProjectRoot(at parent: URL, includeCamera: Bool) throws -> URL {
+  let projectRoot = parent.appendingPathComponent("recording.clingfy", isDirectory: true)
+  let fileManager = FileManager.default
+  try fileManager.createDirectory(
+    at: RecordingProjectPaths.captureDirectoryURL(for: projectRoot),
+    withIntermediateDirectories: true
+  )
+  try fileManager.createDirectory(
+    at: RecordingProjectPaths.postDirectoryURL(for: projectRoot),
+    withIntermediateDirectories: true
+  )
+  try fileManager.createDirectory(
+    at: RecordingProjectPaths.derivedDirectoryURL(for: projectRoot),
+    withIntermediateDirectories: true
+  )
+  if includeCamera {
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.cameraSegmentsDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
     )
-    XCTAssertEqual(
-      AppPaths.cameraSegmentDirectoryURL(for: rawURL).lastPathComponent,
-      "recording.camera.segments"
-    )
+  }
 
-    let artifactNames = AppPaths.allRecordingArtifactURLs(for: rawURL).map(\.lastPathComponent)
+  let manifest = RecordingProjectManifest.create(
+    projectId: "recording",
+    displayName: "Recording",
+    includeCamera: includeCamera
+  )
+  try manifest.write(to: RecordingProjectPaths.manifestURL(for: projectRoot))
+  return projectRoot
+}
+
+final class RecordingProjectPathsTests: XCTestCase {
+  func testProjectArtifactsUseExpectedDirectoryLayout() {
+    let projectRoot = URL(fileURLWithPath: "/tmp/rec_2026-04-05_000000_abcd1234.clingfy", isDirectory: true)
+
+    XCTAssertEqual(RecordingProjectPaths.screenVideoURL(for: projectRoot).path, "/tmp/rec_2026-04-05_000000_abcd1234.clingfy/capture/screen.mov")
+    XCTAssertEqual(RecordingProjectPaths.screenMetadataURL(for: projectRoot).lastPathComponent, "screen.meta.json")
+    XCTAssertEqual(RecordingProjectPaths.cursorDataURL(for: projectRoot).lastPathComponent, "cursor.json")
+    XCTAssertEqual(RecordingProjectPaths.zoomManualURL(for: projectRoot).lastPathComponent, "zoom.manual.json")
+    XCTAssertEqual(RecordingProjectPaths.cameraRawURL(for: projectRoot).lastPathComponent, "raw.mov")
+    XCTAssertEqual(RecordingProjectPaths.cameraMetadataURL(for: projectRoot).lastPathComponent, "meta.json")
+    XCTAssertEqual(RecordingProjectPaths.cameraSegmentsDirectoryURL(for: projectRoot).lastPathComponent, "segments")
+
+    let artifactNames = RecordingProjectPaths.allProjectArtifactURLs(for: projectRoot).map(\.lastPathComponent)
     XCTAssertEqual(
       artifactNames,
       [
-        "recording.mov",
-        "recording.cursor.json",
-        "recording.meta.json",
-        "recording.zoom.manual.json",
-        "recording.camera.mov",
-        "recording.camera.meta.json",
-        "recording.camera.segments",
+        "rec_2026-04-05_000000_abcd1234.clingfy",
+        "project.json",
+        "capture",
+        "screen.mov",
+        "screen.meta.json",
+        "cursor.json",
+        "zoom.manual.json",
+        "camera",
+        "raw.mov",
+        "meta.json",
+        "segments",
+        "post",
+        "state.json",
+        "thumbnail.jpg",
+        "derived",
+        "waveform.json",
       ]
     )
   }
@@ -40,13 +78,17 @@ final class RecordingMetadataTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let rawURL = tempDir.appendingPathComponent("recording.mov")
-    let metadataURL = AppPaths.metadataSidecarURL(for: rawURL)
+    let projectRoot = tempDir.appendingPathComponent("recording.clingfy", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: RecordingProjectPaths.captureDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    let metadataURL = RecordingProjectPaths.screenMetadataURL(for: projectRoot)
     let cameraInfo = RecordingMetadata.CameraCaptureInfo(
       mode: .separateCameraAsset,
       enabled: true,
-      rawRelativePath: "recording.camera.mov",
-      metadataRelativePath: "recording.camera.meta.json",
+      rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+      metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
       deviceId: "camera-1",
       mirroredRaw: true,
       nominalFrameRate: 30,
@@ -54,7 +96,7 @@ final class RecordingMetadataTests: XCTestCase {
       segments: [
         .init(
           index: 0,
-          relativePath: "recording.camera.segments/segment_000.mov",
+          relativePath: "camera/segments/segment_000.mov",
           startWallClock: RecordingMetadata.iso8601String(from: Date(timeIntervalSince1970: 0)),
           endWallClock: RecordingMetadata.iso8601String(from: Date(timeIntervalSince1970: 5))
         )
@@ -80,7 +122,7 @@ final class RecordingMetadataTests: XCTestCase {
       cameraChromaKeyColorArgb: 0xFF00FF00
     )
     let metadata = RecordingMetadata.create(
-      rawURL: rawURL,
+      screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
       displayMode: .explicitID,
       displayID: 123,
       cropRect: CGRect(x: 10, y: 20, width: 300, height: 200),
@@ -98,7 +140,7 @@ final class RecordingMetadataTests: XCTestCase {
     let decoded = try RecordingMetadata.read(from: metadataURL)
 
     XCTAssertEqual(decoded.version, 2)
-    XCTAssertEqual(decoded.screen.rawRelativePath, "recording.mov")
+    XCTAssertEqual(decoded.screen.rawRelativePath, "capture/screen.mov")
     XCTAssertEqual(decoded.screen.windowId, 77)
     XCTAssertEqual(decoded.camera, cameraInfo)
     XCTAssertEqual(decoded.editorSeed, editorSeed)
@@ -864,8 +906,10 @@ final class LetterboxExporterTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
-    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try makeSolidColorVideo(
       url: screenURL,
       size: CGSize(width: 320, height: 180),
@@ -905,8 +949,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: cameraURL,
+      project: project,
       target: target,
       padding: 0.0,
       cornerRadius: 0.0,
@@ -1358,7 +1401,12 @@ final class LetterboxExporterTests: XCTestCase {
       params: cameraParams
     )
     let cameraCrop = try XCTUnwrap(
-      bestCropImage(for: image, canvasSize: params.targetSize, cropRect: cameraResolution.frame)
+      try bestScoredCropImage(
+        for: image,
+        canvasSize: params.targetSize,
+        cropRect: cameraResolution.frame,
+        scorer: { try dominantRedRatio(for: $0, ignoreTransparentPixels: false) }
+      )
     )
     let centerCrop = try XCTUnwrap(
       bestCropImage(
@@ -1808,8 +1856,10 @@ final class LetterboxExporterTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
-    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try makeSolidColorVideo(
       url: screenURL,
       size: CGSize(width: 320, height: 180),
@@ -1848,8 +1898,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: cameraURL,
+      project: project,
       target: target,
       padding: 0.0,
       cornerRadius: 0.0,
@@ -1880,22 +1929,27 @@ final class LetterboxExporterTests: XCTestCase {
     let finalURL = try XCTUnwrap(try exportResult?.get())
 
     let resolution = CameraLayoutResolver.effectiveFrame(canvasSize: target, params: params)
-    let crop = try XCTUnwrap(bestCropImage(
-      for: sampleFrameImage(url: finalURL),
-      canvasSize: target,
-      cropRect: resolution.frame
-    ))
+    let crop = try XCTUnwrap(
+      try bestScoredCropImage(
+        for: sampleFrameImage(url: finalURL),
+        canvasSize: target,
+        cropRect: resolution.frame,
+        scorer: { try dominantRedRatio(for: $0, ignoreTransparentPixels: true) }
+      )
+    )
 
     XCTAssertLessThan(try dominantGreenRatio(for: crop, ignoreTransparentPixels: false), 0.12)
-    XCTAssertGreaterThan(try dominantRedRatio(for: crop, ignoreTransparentPixels: false), 0.05)
+    XCTAssertGreaterThan(try dominantRedRatio(for: crop, ignoreTransparentPixels: true), 0.05)
   }
 
   func testChromaKeySeparateCameraExportCleansTemporaryPrepassArtifactsOnSuccess() throws {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
-    let cameraURL = tempDir.appendingPathComponent("camera-\(UUID().uuidString).mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try makeSolidColorVideo(
       url: screenURL,
       size: CGSize(width: 320, height: 180),
@@ -1932,8 +1986,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: cameraURL,
+      project: project,
       target: CGSize(width: 640, height: 360),
       padding: 0.0,
       cornerRadius: 0.0,
@@ -2077,7 +2130,9 @@ final class LetterboxExporterTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: false)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
     try makeSolidColorVideo(
       url: screenURL,
       size: CGSize(width: 320, height: 180),
@@ -2090,8 +2145,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: nil,
+      project: project,
       target: CGSize(width: 640, height: 360),
       padding: 0.0,
       cornerRadius: 0.0,
@@ -2128,7 +2182,9 @@ final class LetterboxExporterTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: false)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
     try makeSolidColorVideo(
       url: screenURL,
       size: CGSize(width: 180, height: 320),
@@ -2142,8 +2198,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: nil,
+      project: project,
       target: target,
       padding: 0.0,
       cornerRadius: 0.0,
@@ -2203,7 +2258,9 @@ final class LetterboxExporterTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: false)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
     let backgroundURL = tempDir.appendingPathComponent("background.png")
     try makeSolidColorVideo(
       url: screenURL,
@@ -2223,8 +2280,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: nil,
+      project: project,
       target: target,
       padding: 0.0,
       cornerRadius: 0.0,
@@ -2284,8 +2340,10 @@ final class LetterboxExporterTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("screen.mov")
-    let cameraURL = tempDir.appendingPathComponent("camera.mov")
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let project = try RecordingProjectRef.open(projectRoot: projectRoot)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try makeSolidColorVideo(
       url: screenURL,
       size: CGSize(width: 180, height: 320),
@@ -2324,8 +2382,7 @@ final class LetterboxExporterTests: XCTestCase {
     var exportResult: Result<URL, Error>?
 
     exporter.export(
-      inputURL: screenURL,
-      cameraInputURL: cameraURL,
+      project: project,
       target: target,
       padding: 0.0,
       cornerRadius: 0.0,
@@ -2944,12 +3001,26 @@ final class LetterboxExporterTests: XCTestCase {
     canvasSize: CGSize,
     cropRect: CGRect
   ) -> CGImage? {
+    try? bestScoredCropImage(
+      for: image,
+      canvasSize: canvasSize,
+      cropRect: cropRect,
+      scorer: { try nonBlackRatio(for: $0, ignoreTransparentPixels: false) }
+    )
+  }
+
+  private func bestScoredCropImage(
+    for image: CGImage,
+    canvasSize: CGSize,
+    cropRect: CGRect,
+    scorer: (CGImage) throws -> Double
+  ) throws -> CGImage? {
     let imageBounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
     let scaleX = CGFloat(image.width) / max(canvasSize.width, 1.0)
     let scaleY = CGFloat(image.height) / max(canvasSize.height, 1.0)
 
-    return [false, true]
-      .compactMap { flipY -> (CGImage, Double)? in
+    let candidates = [false, true]
+      .compactMap { flipY -> CGImage? in
         let sourceY = flipY ? (canvasSize.height - cropRect.maxY) : cropRect.minY
         let pixelRect = CGRect(
           x: cropRect.minX * scaleX,
@@ -2959,14 +3030,22 @@ final class LetterboxExporterTests: XCTestCase {
         ).integral.intersection(imageBounds)
 
         guard pixelRect.width >= 1.0, pixelRect.height >= 1.0 else { return nil }
-        guard let cropped = image.cropping(to: pixelRect) else { return nil }
-        let ratio = (try? nonBlackRatio(for: cropped, ignoreTransparentPixels: false)) ?? 0.0
-        return (cropped, ratio)
+        return image.cropping(to: pixelRect)
       }
-      .max(by: { lhs, rhs in
-        lhs.1 < rhs.1
-      })?
-      .0
+
+    guard !candidates.isEmpty else { return nil }
+
+    var bestCrop: CGImage?
+    var bestScore = -Double.infinity
+    for candidate in candidates {
+      let score = try scorer(candidate)
+      if score > bestScore {
+        bestScore = score
+        bestCrop = candidate
+      }
+    }
+
+    return bestCrop
   }
 
   private func cropNonBlackRatio(
@@ -3257,12 +3336,12 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let publishedScreenURL = tempDir.appendingPathComponent("recording.mov")
-    let inProgressScreenURL = tempDir.appendingPathComponent("recording.123.inprogress.mov")
-    let metadataURL = AppPaths.metadataSidecarURL(for: inProgressScreenURL)
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let publishedScreenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let metadataURL = RecordingProjectPaths.screenMetadataURL(for: projectRoot)
 
     let initialMetadata = RecordingMetadata.create(
-      rawURL: publishedScreenURL,
+      screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
       displayMode: .explicitID,
       displayID: 1,
       cropRect: nil,
@@ -3275,8 +3354,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       camera: RecordingMetadata.CameraCaptureInfo(
         mode: .separateCameraAsset,
         enabled: true,
-        rawRelativePath: AppPaths.cameraRawURL(for: publishedScreenURL).lastPathComponent,
-        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: publishedScreenURL).lastPathComponent,
+        rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+        metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
         deviceId: "camera-1",
         mirroredRaw: true,
         nominalFrameRate: 30,
@@ -3288,14 +3367,13 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     try initialMetadata.write(to: metadataURL)
 
     let cameraResult = CameraRecordingResult(
-      rawURL: AppPaths.cameraRawURL(for: inProgressScreenURL),
-      metadataURL: AppPaths.cameraMetadataSidecarURL(for: inProgressScreenURL),
+      rawURL: RecordingProjectPaths.cameraRawURL(for: projectRoot),
+      metadataURL: RecordingProjectPaths.cameraMetadataURL(for: projectRoot),
       metadata: CameraRecordingMetadata(
         version: 1,
         recordingId: "camera-recording-id",
-        rawRelativePath: AppPaths.cameraRawURL(for: inProgressScreenURL).lastPathComponent,
-        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: inProgressScreenURL)
-          .lastPathComponent,
+        rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+        metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
         deviceId: "camera-1",
         mirroredRaw: true,
         nominalFrameRate: 30,
@@ -3308,15 +3386,14 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
 
     let facade = ScreenRecorderFacade()
     facade._testUpdateMetadataSidecarOnFinish(
-      for: inProgressScreenURL,
+      projectRoot: projectRoot,
       cameraResult: cameraResult,
       publishedScreenURL: publishedScreenURL
     )
 
     let updated = try RecordingMetadata.read(from: metadataURL)
-    XCTAssertEqual(updated.camera?.rawRelativePath, "recording.camera.mov")
-    XCTAssertEqual(updated.camera?.metadataRelativePath, "recording.camera.meta.json")
-    XCTAssertFalse(updated.camera?.rawRelativePath?.contains(".inprogress.") ?? true)
+    XCTAssertEqual(updated.camera?.rawRelativePath, "camera/raw.mov")
+    XCTAssertEqual(updated.camera?.metadataRelativePath, "camera/meta.json")
   }
 
   func testSeparateCameraCaptureConfigRespectsRecorderExclusionPreference() {
@@ -3495,13 +3572,14 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("recording.mov")
-    let cameraURL = AppPaths.cameraRawURL(for: screenURL)
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try Data("screen".utf8).write(to: screenURL)
     try Data("camera".utf8).write(to: cameraURL)
 
     let metadata = RecordingMetadata.create(
-      rawURL: screenURL,
+      screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
       displayMode: .explicitID,
       displayID: 1,
       cropRect: nil,
@@ -3514,8 +3592,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       camera: RecordingMetadata.CameraCaptureInfo(
         mode: .separateCameraAsset,
         enabled: true,
-        rawRelativePath: cameraURL.lastPathComponent,
-        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: screenURL).lastPathComponent,
+        rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+        metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
         deviceId: "camera-1",
         mirroredRaw: true,
         nominalFrameRate: 30,
@@ -3524,10 +3602,10 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       ),
       editorSeed: makeEditorSeed()
     )
-    try metadata.write(to: AppPaths.metadataSidecarURL(for: screenURL))
+    try metadata.write(to: RecordingProjectPaths.screenMetadataURL(for: projectRoot))
 
     let facade = ScreenRecorderFacade()
-    let mediaSources = facade.resolvePreviewMediaSources(source: screenURL.path)
+    let mediaSources = facade.resolvePreviewMediaSources(projectPath: projectRoot.path)
 
     XCTAssertEqual(mediaSources.cameraPath, cameraURL.path)
   }
@@ -3536,13 +3614,12 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("recording.mov")
-    let publishedCameraURL = AppPaths.cameraRawURL(for: screenURL)
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
     try Data("screen".utf8).write(to: screenURL)
-    try Data("camera".utf8).write(to: publishedCameraURL)
 
     let metadata = RecordingMetadata.create(
-      rawURL: screenURL,
+      screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
       displayMode: .explicitID,
       displayID: 1,
       cropRect: nil,
@@ -3555,8 +3632,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       camera: RecordingMetadata.CameraCaptureInfo(
         mode: .separateCameraAsset,
         enabled: true,
-        rawRelativePath: "recording.123.inprogress.camera.mov",
-        metadataRelativePath: "recording.123.inprogress.camera.meta.json",
+        rawRelativePath: "camera/missing.mov",
+        metadataRelativePath: "camera/missing.meta.json",
         deviceId: "camera-1",
         mirroredRaw: true,
         nominalFrameRate: 30,
@@ -3565,10 +3642,10 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       ),
       editorSeed: makeEditorSeed()
     )
-    try metadata.write(to: AppPaths.metadataSidecarURL(for: screenURL))
+    try metadata.write(to: RecordingProjectPaths.screenMetadataURL(for: projectRoot))
 
     let facade = ScreenRecorderFacade()
-    let mediaSources = facade.resolvePreviewMediaSources(source: screenURL.path)
+    let mediaSources = facade.resolvePreviewMediaSources(projectPath: projectRoot.path)
 
     XCTAssertNil(mediaSources.cameraPath)
   }
@@ -3577,13 +3654,14 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("recording.mov")
-    let cameraURL = AppPaths.cameraRawURL(for: screenURL)
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try Data("screen".utf8).write(to: screenURL)
     try Data("camera".utf8).write(to: cameraURL)
 
     let metadata = RecordingMetadata.create(
-      rawURL: screenURL,
+      screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
       displayMode: .explicitID,
       displayID: 1,
       cropRect: nil,
@@ -3596,8 +3674,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       camera: RecordingMetadata.CameraCaptureInfo(
         mode: .separateCameraAsset,
         enabled: true,
-        rawRelativePath: cameraURL.lastPathComponent,
-        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: screenURL).lastPathComponent,
+        rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+        metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
         deviceId: "camera-1",
         mirroredRaw: true,
         nominalFrameRate: 30,
@@ -3606,7 +3684,7 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       ),
       editorSeed: makeEditorSeed()
     )
-    try metadata.write(to: AppPaths.metadataSidecarURL(for: screenURL))
+    try metadata.write(to: RecordingProjectPaths.screenMetadataURL(for: projectRoot))
 
     let params = CompositionParams(
       targetSize: CGSize(width: 1280, height: 720),
@@ -3625,7 +3703,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       audioVolumePercent: 100.0
     )
     let facade = ScreenRecorderFacade()
-    let scene = facade.resolvePreviewScene(source: screenURL.path, screenParams: params)
+    try metadata.write(to: RecordingProjectPaths.screenMetadataURL(for: projectRoot))
+    let scene = facade.resolvePreviewScene(projectPath: projectRoot.path, screenParams: params)
 
     XCTAssertEqual(scene.mediaSources.screenPath, screenURL.path)
     XCTAssertEqual(scene.mediaSources.cameraPath, cameraURL.path)
@@ -3636,13 +3715,14 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let tempDir = makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
-    let screenURL = tempDir.appendingPathComponent("recording.mov")
-    let cameraURL = AppPaths.cameraRawURL(for: screenURL)
+    let projectRoot = try makeRecordingProjectRoot(at: tempDir, includeCamera: true)
+    let screenURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
+    let cameraURL = RecordingProjectPaths.cameraRawURL(for: projectRoot)
     try Data("screen".utf8).write(to: screenURL)
     try Data("camera".utf8).write(to: cameraURL)
 
     let metadata = RecordingMetadata.create(
-      rawURL: screenURL,
+      screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
       displayMode: .explicitID,
       displayID: 1,
       cropRect: nil,
@@ -3655,8 +3735,8 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       camera: RecordingMetadata.CameraCaptureInfo(
         mode: .separateCameraAsset,
         enabled: true,
-        rawRelativePath: cameraURL.lastPathComponent,
-        metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: screenURL).lastPathComponent,
+        rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+        metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
         deviceId: "camera-1",
         mirroredRaw: true,
         nominalFrameRate: 30,
@@ -3665,15 +3745,17 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       ),
       editorSeed: makeEditorSeed()
     )
-    try metadata.write(to: AppPaths.metadataSidecarURL(for: screenURL))
+    try metadata.write(to: RecordingProjectPaths.screenMetadataURL(for: projectRoot))
 
     let facade = ScreenRecorderFacade()
     var scenePayload: Any?
-    facade.getRecordingSceneInfo(source: screenURL.path) { value in
+    facade.getRecordingSceneInfo(projectPath: projectRoot.path) { value in
       scenePayload = value
     }
 
     let payload = try XCTUnwrap(scenePayload as? [String: Any])
+    XCTAssertEqual(payload["projectPath"] as? String, projectRoot.path)
+    XCTAssertEqual(payload["screenPath"] as? String, screenURL.path)
     XCTAssertEqual(payload["cameraPath"] as? String, cameraURL.path)
     XCTAssertNil(payload["supportsAdvancedCameraExportStyling"])
     let capabilities = try XCTUnwrap(payload["cameraExportCapabilities"] as? [String: Bool])
@@ -3712,7 +3794,7 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let facade = ScreenRecorderFacade()
 
     let params = facade.resolveCameraCompositionParams(
-      source: "/tmp/recording.mov",
+      projectPath: "/tmp/recording.clingfy",
       args: [
         "cameraVisible": true,
         "cameraLayoutPreset": "overlayTopRight",
@@ -3730,7 +3812,7 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
     let facade = ScreenRecorderFacade()
 
     let params = facade.resolveCameraCompositionParams(
-      source: "/tmp/recording.mov",
+      projectPath: "/tmp/recording.clingfy",
       args: [
         "cameraVisible": true,
         "cameraLayoutPreset": "overlayTopRight",
@@ -3877,6 +3959,37 @@ final class ScreenRecorderFacadeSeparateCameraTests: XCTestCase {
       attributes: nil
     )
     return url
+  }
+
+  private func makeRecordingProjectRoot(at parent: URL, includeCamera: Bool) throws -> URL {
+    let projectRoot = parent.appendingPathComponent("recording.clingfy", isDirectory: true)
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.captureDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.postDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    try fileManager.createDirectory(
+      at: RecordingProjectPaths.derivedDirectoryURL(for: projectRoot),
+      withIntermediateDirectories: true
+    )
+    if includeCamera {
+      try fileManager.createDirectory(
+        at: RecordingProjectPaths.cameraSegmentsDirectoryURL(for: projectRoot),
+        withIntermediateDirectories: true
+      )
+    }
+
+    let manifest = RecordingProjectManifest.create(
+      projectId: "recording",
+      displayName: "Recording",
+      includeCamera: includeCamera
+    )
+    try manifest.write(to: RecordingProjectPaths.manifestURL(for: projectRoot))
+    return projectRoot
   }
 
   private func makeEditorSeed() -> RecordingMetadata.EditorSeed {

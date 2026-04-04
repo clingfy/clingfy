@@ -471,90 +471,9 @@ private struct ExportFormatInfo {
   let avFileType: AVFileType?  // nil for formats not handled by AVAssetExportSession (gif)
 }
 
-struct RecordingFileSession {
-  let finalRawURL: URL
-  let inProgressRawURL: URL
-}
-
 struct CaptureDestinationDiagnostics {
-  static func url(for activeSession: RecordingFileSession?) -> URL {
-    activeSession?.inProgressRawURL ?? AppPaths.tempRoot()
-  }
-}
-
-struct RecordingArtifactPromotionPlan {
-  let sourceRawURL: URL
-  let finalRawURL: URL
-
-  static func make(
-    session: RecordingFileSession,
-    recordedRawURL: URL,
-    fileExists: (URL) -> Bool
-  ) -> RecordingArtifactPromotionPlan {
-    let sourceRawURL =
-      fileExists(session.inProgressRawURL) ? session.inProgressRawURL : recordedRawURL
-    return RecordingArtifactPromotionPlan(
-      sourceRawURL: sourceRawURL,
-      finalRawURL: session.finalRawURL
-    )
-  }
-}
-
-struct RecordingArtifactPromoter {
-  static func promote(
-    session: RecordingFileSession,
-    recordedRawURL: URL,
-    fileManager: FileManager = .default
-  ) throws -> URL {
-    let promotionPlan = RecordingArtifactPromotionPlan.make(
-      session: session,
-      recordedRawURL: recordedRawURL,
-      fileExists: { fileManager.fileExists(atPath: $0.path) }
-    )
-
-    try moveItemIfExists(
-      from: promotionPlan.sourceRawURL,
-      to: promotionPlan.finalRawURL,
-      fileManager: fileManager
-    )
-
-    let tempArtifacts = AppPaths.allRecordingArtifactURLs(for: promotionPlan.sourceRawURL)
-      .filter { $0 != promotionPlan.sourceRawURL }
-    let finalArtifacts = AppPaths.allRecordingArtifactURLs(for: promotionPlan.finalRawURL)
-      .filter { $0 != promotionPlan.finalRawURL }
-    for (src, dst) in zip(tempArtifacts, finalArtifacts) {
-      try moveItemIfExists(from: src, to: dst, fileManager: fileManager)
-    }
-
-    return promotionPlan.finalRawURL
-  }
-
-  private static func moveItemIfExists(
-    from sourceURL: URL,
-    to destinationURL: URL,
-    fileManager: FileManager
-  ) throws {
-    let src = sourceURL.standardizedFileURL
-    let dst = destinationURL.standardizedFileURL
-
-    if src.path == dst.path { return }
-    guard fileManager.fileExists(atPath: src.path) else { return }
-
-    try fileManager.createDirectory(
-      at: dst.deletingLastPathComponent(),
-      withIntermediateDirectories: true
-    )
-
-    if fileManager.fileExists(atPath: dst.path) {
-      try fileManager.removeItem(at: dst)
-    }
-
-    do {
-      try fileManager.moveItem(at: src, to: dst)
-    } catch {
-      try fileManager.copyItem(at: src, to: dst)
-      try? fileManager.removeItem(at: src)
-    }
+  static func url(for activeProjectRoot: URL?) -> URL {
+    activeProjectRoot.map { RecordingProjectPaths.screenVideoURL(for: $0) } ?? AppPaths.tempRoot()
   }
 }
 
@@ -656,8 +575,7 @@ final class ScreenRecorderFacade: NSObject {
   private var pendingMetadata: RecordingMetadata?
   private var pendingCameraRecordingSession: CameraRecordingSession?
   private var pendingSeparateCameraFailure: FlutterError?
-  private var currentRawURL: URL?
-  private var activeRecordingFileSession: RecordingFileSession?
+  private var activeRecordingProjectRoot: URL?
 
   // state
   private var state: RecorderState = .idle
@@ -734,9 +652,21 @@ final class ScreenRecorderFacade: NSObject {
     setCaptureBackend(CaptureBackendAVFoundation())
     refreshMicrophoneLevelMonitoring(resetMeter: true)
 
+    let didResetLegacyWorkspace = RecordingProjectPaths.performOneTimeLegacyWorkspaceResetIfNeeded(
+      isNonProductionBuild: CaptureDestinationPreflightPolicy.isNonProductionBuild(
+        bundleIdentifier: Bundle.main.bundleIdentifier
+      )
+    )
+    if didResetLegacyWorkspace {
+      NativeLogger.i(
+        "Facade",
+        "Reset legacy flat recordings workspace for project-folder schema"
+      )
+    }
+
     // Scan internal workspace on startup for diagnostics
     scanInternalWorkspaceOnStartup()
-    cleanupStaleInProgressRecordingsOnStartup()
+    recordingStore.markInterruptedProjectsAsFailed()
   }
 
   private enum MicrophoneTelemetrySource {
@@ -848,7 +778,7 @@ final class ScreenRecorderFacade: NSObject {
 
   func startRecording(args: [String: Any]?, result: @escaping FlutterResult) {
     guard state == .idle else {
-      if let path = currentRawURL?.path ?? capture.currentOutputURL?.path {
+      if let path = activeRecordingProjectRoot?.path {
         result(path)
       } else {
         result(flutterError(NativeErrorCode.alreadyRecording, ""))
@@ -932,32 +862,32 @@ final class ScreenRecorderFacade: NSObject {
         return
       }
 
-      activeRecordingFileSession = nil
+      activeRecordingProjectRoot = nil
       pendingCameraRecordingSession = nil
-      currentRawURL = nil
+      let projectId = RecordingProjectPaths.makeProjectID()
+      let projectRoot = try RecordingProjectPaths.createProjectSkeleton(projectId: projectId)
+      let screenVideoURL = RecordingProjectPaths.screenVideoURL(for: projectRoot)
 
-      let session = try makeRecordingFileSession(in: workspaceDir)
       try preflightCaptureDestination(
-        session.inProgressRawURL,
+        screenVideoURL,
         allowLowStorageBypass: allowLowStorageBypass
       )
-      activeRecordingFileSession = session
-      currentRawURL = session.finalRawURL
+      activeRecordingProjectRoot = projectRoot
 
       NativeLogger.d(
-        "Facade", "Prepared recording file session",
+        "Facade", "Prepared recording project",
         context: [
-          "tempRaw": session.inProgressRawURL.lastPathComponent,
-          "finalRaw": session.finalRawURL.lastPathComponent,
+          "projectRoot": projectRoot.lastPathComponent,
+          "screenVideo": screenVideoURL.lastPathComponent,
           "cameraMode": effectiveCameraCaptureModeForRecording.rawValue,
         ])
 
       if shouldRecordSeparateCameraAsset {
-        pendingCameraRecordingSession = cameraRecordingSession(for: session)
+        pendingCameraRecordingSession = cameraRecordingSession(for: projectRoot)
       }
 
       pendingMetadata = RecordingMetadata.create(
-        rawURL: session.finalRawURL,
+        screenRawRelativePath: RecordingProjectPaths.relativeScreenVideoPath,
         displayMode: prefs.displayMode,
         displayID: captureTarget.displayID,
         cropRect: captureTarget.cropRect,
@@ -967,12 +897,20 @@ final class ScreenRecorderFacade: NSObject {
         cursorLinked: prefs.cursorLinked,
         windowID: (prefs.displayMode == .singleAppWindow ? selectedAppWindowID : nil),
         excludedRecorderApp: prefs.excludeRecorderApp,
-        camera: pendingCameraCaptureInfo(for: session),
+        camera: pendingCameraCaptureInfo(for: projectRoot),
         editorSeed: editorSeed(for: target)
       )
 
+      var manifest = RecordingProjectManifest.create(
+        projectId: projectId,
+        displayName: RecordingProjectPaths.displayName(),
+        includeCamera: shouldRecordSeparateCameraAsset
+      )
+      manifest.updateStatus(.capturing)
+      try manifest.write(to: RecordingProjectPaths.manifestURL(for: projectRoot))
+
       let outputURL: () throws -> URL = {
-        session.inProgressRawURL
+        screenVideoURL
       }
 
       // Start recording
@@ -1701,9 +1639,21 @@ final class ScreenRecorderFacade: NSObject {
     }
   }
 
-  private func loadRecordingMetadata(for sourceURL: URL) -> RecordingMetadata? {
-    let metadataURL = AppPaths.metadataSidecarURL(for: sourceURL)
-    guard FileManager.default.fileExists(atPath: metadataURL.path) else {
+  private func loadRecordingProject(projectPath: String) -> RecordingProjectRef? {
+    do {
+      return try RecordingProjectRef.open(projectPath: projectPath)
+    } catch {
+      NativeLogger.w(
+        "Scene",
+        "Failed to open recording project",
+        context: ["projectPath": projectPath, "error": error.localizedDescription]
+      )
+      return nil
+    }
+  }
+
+  private func loadRecordingMetadata(projectRef: RecordingProjectRef) -> RecordingMetadata? {
+    guard let metadataURL = projectRef.mediaSources().metadataURL else {
       return nil
     }
 
@@ -1720,8 +1670,7 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   private func resolvedCameraAssetURL(
-    for sourceURL: URL,
-    metadata: RecordingMetadata?,
+    projectRef: RecordingProjectRef,
     explicitCameraPath: String?
   ) -> URL? {
     if let explicitCameraPath, !explicitCameraPath.isEmpty {
@@ -1737,24 +1686,7 @@ final class ScreenRecorderFacade: NSObject {
       return explicitURL
     }
 
-    guard let camera = metadata?.camera,
-      camera.mode == .separateCameraAsset,
-      camera.enabled,
-      let rawRelativePath = camera.rawRelativePath
-    else {
-      return nil
-    }
-
-    let candidate = sourceURL.deletingLastPathComponent().appendingPathComponent(rawRelativePath)
-    guard FileManager.default.fileExists(atPath: candidate.path) else {
-      NativeLogger.w(
-        "Scene",
-        "Camera asset referenced by metadata is missing; falling back to screen-only",
-        context: ["path": candidate.path]
-      )
-      return nil
-    }
-    return candidate
+    return projectRef.mediaSources().cameraVideoURL
   }
 
   private func cameraCompositionParams(from editorSeed: RecordingMetadata.EditorSeed) -> CameraCompositionParams {
@@ -1948,15 +1880,23 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   func resolvePreviewMediaSources(
-    source: String,
+    projectPath: String,
     explicitCameraPath: String? = nil
   ) -> PreviewMediaSources {
-    let sourceURL = URL(fileURLWithPath: source)
-    let metadata = loadRecordingMetadata(for: sourceURL)
-    let metadataURL = AppPaths.metadataSidecarURL(for: sourceURL)
+    guard let projectRef = loadRecordingProject(projectPath: projectPath) else {
+      let fallbackURL = URL(fileURLWithPath: projectPath)
+      return PreviewMediaSources(
+        projectPath: projectPath,
+        screenPath: fallbackURL.path,
+        cameraPath: explicitCameraPath,
+        metadataPath: nil,
+        cursorPath: nil,
+        zoomManualPath: nil
+      )
+    }
+    let mediaSources = projectRef.mediaSources()
     let resolvedCameraURL = resolvedCameraAssetURL(
-      for: sourceURL,
-      metadata: metadata,
+      projectRef: projectRef,
       explicitCameraPath: explicitCameraPath
     )
 
@@ -1964,43 +1904,49 @@ final class ScreenRecorderFacade: NSObject {
       "Scene",
       "Resolved preview media sources",
       context: [
-        "screenPath": sourceURL.path,
+        "projectPath": projectPath,
+        "screenPath": mediaSources.screenPath,
         "cameraPath": resolvedCameraURL?.path ?? "nil",
-        "metadataPath": FileManager.default.fileExists(atPath: metadataURL.path) ? metadataURL.path : "nil",
+        "metadataPath": mediaSources.metadataPath ?? "nil",
+        "cursorPath": mediaSources.cursorPath ?? "nil",
+        "zoomManualPath": mediaSources.zoomManualPath ?? "nil",
       ]
     )
 
     return PreviewMediaSources(
-      screenPath: sourceURL.path,
+      projectPath: projectPath,
+      screenPath: mediaSources.screenPath,
       cameraPath: resolvedCameraURL?.path,
-      metadataPath: FileManager.default.fileExists(atPath: metadataURL.path) ? metadataURL.path : nil
+      metadataPath: mediaSources.metadataPath,
+      cursorPath: mediaSources.cursorPath,
+      zoomManualPath: mediaSources.zoomManualPath
     )
   }
 
   private func resolvePreviewSceneComponents(
-    source: String,
+    projectPath: String,
     explicitCameraPath: String? = nil,
     args: [String: Any]? = nil
   ) -> (mediaSources: PreviewMediaSources, cameraParams: CameraCompositionParams?) {
     let mediaSources = resolvePreviewMediaSources(
-      source: source,
+      projectPath: projectPath,
       explicitCameraPath: explicitCameraPath
     )
     let cameraParams = resolveCameraCompositionParams(
-      source: source,
+      projectPath: projectPath,
       args: args
     )
     return (mediaSources, cameraParams)
   }
 
   func resolvePreviewScene(
-    source: String,
+    projectPath: String,
     screenParams: CompositionParams,
     explicitCameraPath: String? = nil,
     args: [String: Any]? = nil
   ) -> PreviewScene {
     let components = resolvePreviewSceneComponents(
-      source: source,
+      projectPath: projectPath,
       explicitCameraPath: explicitCameraPath,
       args: args
     )
@@ -2060,11 +2006,12 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   func resolveCameraCompositionParams(
-    source: String,
+    projectPath: String,
     args: [String: Any]? = nil
   ) -> CameraCompositionParams? {
-    let sourceURL = URL(fileURLWithPath: source)
-    let metadata = loadRecordingMetadata(for: sourceURL)
+    let metadata = loadRecordingProject(projectPath: projectPath).flatMap { projectRef in
+      loadRecordingMetadata(projectRef: projectRef)
+    }
     let seededParams = metadata.map { cameraCompositionParams(from: $0.editorSeed) }
     let resolved = explicitCameraCompositionParams(from: args ?? [:], fallback: seededParams)
 
@@ -2072,7 +2019,7 @@ final class ScreenRecorderFacade: NSObject {
       "Scene",
       "Resolved camera composition params",
       context: [
-        "source": sourceURL.path,
+        "projectPath": projectPath,
         "hasSeed": seededParams != nil,
         "hasExplicitArgs": args.map(anyCameraParamOverride(in:)) ?? false,
         "visible": resolved?.visible ?? false,
@@ -2083,13 +2030,14 @@ final class ScreenRecorderFacade: NSObject {
     return resolved
   }
 
-  func getRecordingSceneInfo(source: String, result: @escaping FlutterResult) {
-    let components = resolvePreviewSceneComponents(source: source)
+  func getRecordingSceneInfo(projectPath: String, result: @escaping FlutterResult) {
+    let components = resolvePreviewSceneComponents(projectPath: projectPath)
     let mediaSources = components.mediaSources
     let cameraParams = components.cameraParams
     let exportCapabilities = cameraExportCapabilities(for: mediaSources)
 
     var payload: [String: Any] = [
+      "projectPath": mediaSources.projectPath,
       "screenPath": mediaSources.screenPath,
       "cameraExportCapabilities": exportCapabilities.payload,
     ]
@@ -2107,7 +2055,7 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   func processVideo(
-    source: String,
+    projectPath: String,
     layout: String,
     resolution: String,
     fit: String,
@@ -2129,7 +2077,11 @@ final class ScreenRecorderFacade: NSObject {
     cameraParams: CameraCompositionParams?,
     result: @escaping FlutterResult
   ) {
-    let inputURL = URL(fileURLWithPath: source)
+    let mediaSources = resolvePreviewMediaSources(
+      projectPath: projectPath,
+      explicitCameraPath: cameraPath
+    )
+    let inputURL = URL(fileURLWithPath: mediaSources.screenPath)
     let asset = AVAsset(url: inputURL)
 
     func orientedSize(_ track: AVAssetTrack) -> CGSize {
@@ -2170,7 +2122,8 @@ final class ScreenRecorderFacade: NSObject {
     NativeLogger.i(
       "Facade", "processVideo called (New Architecture)",
       context: [
-        "source": source,
+        "projectPath": projectPath,
+        "source": inputURL.path,
         "layout": layout,
         "resolution": resolution,
         "fit": fit,
@@ -2179,10 +2132,7 @@ final class ScreenRecorderFacade: NSObject {
       ])
 
     let previewScene = PreviewScene(
-      mediaSources: resolvePreviewMediaSources(
-        source: source,
-        explicitCameraPath: cameraPath
-      ),
+      mediaSources: mediaSources,
       screenParams: params,
       cameraParams: cameraParams
     )
@@ -2198,7 +2148,7 @@ final class ScreenRecorderFacade: NSObject {
         )
       }
     }
-    result(source)
+    result(projectPath)
   }
 
   func previewSetAudioGainDb(audioGainDb: Double, result: @escaping FlutterResult) {
@@ -2235,7 +2185,7 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   func exportVideo(
-    source: String,
+    projectPath: String,
     layout: String,
     resolution: String,
     fit: String,
@@ -2260,7 +2210,18 @@ final class ScreenRecorderFacade: NSObject {
     onProgress: ((Double) -> Void)? = nil,
     result: @escaping FlutterResult
   ) {
-    let inputURL = URL(fileURLWithPath: source)
+    guard let projectRef = loadRecordingProject(projectPath: projectPath) else {
+      result(
+        FlutterError(
+          code: "EXPORT_INPUT_MISSING",
+          message: "Recording project not found. It may have been moved or deleted.",
+          details: projectPath
+        )
+      )
+      return
+    }
+    let mediaSources = projectRef.mediaSources()
+    let inputURL = mediaSources.screenVideoURL
     let asset = AVAsset(url: inputURL)
 
     func orientedSize(_ track: AVAssetTrack) -> CGSize {
@@ -2314,8 +2275,7 @@ final class ScreenRecorderFacade: NSObject {
     let exportCameraParams = exportSanitizedCameraParams(cameraParams, cameraPath: cameraPath)
 
     exporter.export(
-      inputURL: inputURL,
-      cameraInputURL: cameraPath.map(URL.init(fileURLWithPath:)),
+      project: projectRef,
       target: targetSize,
       padding: padding,
       cornerRadius: cornerRadius,
@@ -2340,9 +2300,22 @@ final class ScreenRecorderFacade: NSObject {
     ) { res in
       switch res {
       case .success(let final):
+        if var manifest = try? RecordingProjectManifest.read(
+          from: RecordingProjectPaths.manifestURL(for: projectRef.rootURL)
+        ) {
+          manifest.appendExportRecord(
+            format: format,
+            resolution: resolution,
+            destinationPath: final.path
+          )
+          try? manifest.write(to: RecordingProjectPaths.manifestURL(for: projectRef.rootURL))
+        }
         // Cleanup raw recording and sidecars after successful export
         DispatchQueue.global(qos: .utility).async {
-          recordingStoreRef.cleanupAfterExport(rawURL: inputURL, keepOriginals: keepOriginals)
+          recordingStoreRef.cleanupAfterExport(
+            projectRootURL: projectRef.rootURL,
+            keepOriginals: keepOriginals
+          )
         }
         result(final.path)
       case .failure(let err):
@@ -2384,25 +2357,28 @@ final class ScreenRecorderFacade: NSObject {
     exporter.cancel()
   }
 
-  func getZoomSegments(videoPath: String, result: @escaping FlutterResult) {
-    let videoURL = URL(fileURLWithPath: videoPath)
+  func getZoomSegments(projectPath: String, result: @escaping FlutterResult) {
+    guard let projectRef = loadRecordingProject(projectPath: projectPath) else {
+      result([])
+      return
+    }
+    let mediaSources = projectRef.mediaSources()
+    let videoURL = mediaSources.screenVideoURL
     let asset = AVAsset(url: videoURL)
 
     // 1. Check if asset is valid and duration is finite
     guard asset.duration.isNumeric else {
       NativeLogger.e(
-        "Facade", "getZoomSegments: duration is not numeric", context: ["path": videoPath])
+        "Facade", "getZoomSegments: duration is not numeric", context: ["projectPath": projectPath])
       result([])
       return
     }
     let durationSeconds = asset.duration.seconds
 
     // 2. Locate cursor sidecar
-    let cursorURL = AppPaths.cursorSidecarURL(for: videoURL)
-
-    guard FileManager.default.fileExists(atPath: cursorURL.path) else {
+    guard let cursorURL = mediaSources.cursorDataURL else {
       NativeLogger.w(
-        "Facade", "getZoomSegments: cursor.json missing", context: ["path": cursorURL.path])
+        "Facade", "getZoomSegments: cursor.json missing", context: ["projectPath": projectPath])
       result([])
       return
     }
@@ -2455,10 +2431,12 @@ final class ScreenRecorderFacade: NSObject {
     refreshMicrophoneLevelMonitoring(resetMeter: false)
     recordedDurationTracker.reset()
     resetRecordingSessionSuppressions()
-    activeRecordingFileSession = nil
+    if let projectRoot = activeRecordingProjectRoot {
+      updateProjectManifestStatus(.failed, projectRoot: projectRoot)
+    }
+    activeRecordingProjectRoot = nil
     pendingCameraRecordingSession = nil
     pendingSeparateCameraFailure = nil
-    currentRawURL = nil
     pendingMetadata = nil
     if pendingStop {
       stopResult?(err)
@@ -2540,13 +2518,13 @@ final class ScreenRecorderFacade: NSObject {
     return device.activeFormat.videoSupportedFrameRateRanges.first?.maxFrameRate
   }
 
-  private func cameraRecordingSession(for fileSession: RecordingFileSession) -> CameraRecordingSession {
+  private func cameraRecordingSession(for projectRoot: URL) -> CameraRecordingSession {
     CameraRecordingSession(
-      outputURL: AppPaths.cameraRawURL(for: fileSession.inProgressRawURL),
-      metadataURL: AppPaths.cameraMetadataSidecarURL(for: fileSession.inProgressRawURL),
-      rawRelativePath: AppPaths.cameraRawURL(for: fileSession.finalRawURL).lastPathComponent,
-      metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: fileSession.finalRawURL).lastPathComponent,
-      segmentDirectoryURL: AppPaths.cameraSegmentDirectoryURL(for: fileSession.inProgressRawURL),
+      outputURL: RecordingProjectPaths.cameraRawURL(for: projectRoot),
+      metadataURL: RecordingProjectPaths.cameraMetadataURL(for: projectRoot),
+      rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+      metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
+      segmentDirectoryURL: RecordingProjectPaths.cameraSegmentsDirectoryURL(for: projectRoot),
       deviceId: prefs.videoDeviceId,
       mirroredRaw: prefs.overlayMirror,
       nominalFrameRate: cameraNominalFrameRate(deviceID: prefs.videoDeviceId),
@@ -2554,13 +2532,13 @@ final class ScreenRecorderFacade: NSObject {
     )
   }
 
-  private func pendingCameraCaptureInfo(for fileSession: RecordingFileSession?) -> RecordingMetadata.CameraCaptureInfo? {
-    guard shouldRecordSeparateCameraAsset, let fileSession else { return nil }
+  private func pendingCameraCaptureInfo(for projectRoot: URL?) -> RecordingMetadata.CameraCaptureInfo? {
+    guard shouldRecordSeparateCameraAsset, projectRoot != nil else { return nil }
     return RecordingMetadata.CameraCaptureInfo(
       mode: .separateCameraAsset,
       enabled: true,
-      rawRelativePath: AppPaths.cameraRawURL(for: fileSession.finalRawURL).lastPathComponent,
-      metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: fileSession.finalRawURL).lastPathComponent,
+      rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+      metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
       deviceId: prefs.videoDeviceId,
       mirroredRaw: prefs.overlayMirror,
       nominalFrameRate: cameraNominalFrameRate(deviceID: prefs.videoDeviceId),
@@ -2684,30 +2662,6 @@ final class ScreenRecorderFacade: NSObject {
     return candidate
   }
 
-  private func makeRecordingFileSession(in finalFolder: URL) throws -> RecordingFileSession {
-    let fm = FileManager.default
-    let finalRawURL = try makeOutputURL(in: finalFolder)
-
-    let tempFolder = AppPaths.tempRoot()
-    try fm.createDirectory(at: tempFolder, withIntermediateDirectories: true)
-
-    let stem = finalRawURL.deletingPathExtension().lastPathComponent
-    let ext = finalRawURL.pathExtension.isEmpty ? "mov" : finalRawURL.pathExtension
-    var tempRawURL = tempFolder.appendingPathComponent(
-      "\(stem).\(UUID().uuidString).inprogress.\(ext)")
-
-    while fm.fileExists(atPath: tempRawURL.path) {
-      tempRawURL = tempFolder.appendingPathComponent(
-        "\(stem).\(UUID().uuidString).inprogress.\(ext)")
-    }
-
-    return RecordingFileSession(finalRawURL: finalRawURL, inProgressRawURL: tempRawURL)
-  }
-
-  private func finalizeRecordingArtifactsIfNeeded(recordedRawURL: URL) throws -> URL {
-    guard let session = activeRecordingFileSession else { return recordedRawURL }
-    return try RecordingArtifactPromoter.promote(session: session, recordedRawURL: recordedRawURL)
-  }
   private enum CaptureTargetError: Error {
     case noWindowSelected, windowUnavailable, noAreaSelected
   }
@@ -3133,7 +3087,7 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   private func currentCaptureDestinationURL() -> URL {
-    CaptureDestinationDiagnostics.url(for: activeRecordingFileSession)
+    CaptureDestinationDiagnostics.url(for: activeRecordingProjectRoot)
   }
 
   private func preflightCaptureDestination(_ url: URL, allowLowStorageBypass: Bool) throws {
@@ -3367,8 +3321,6 @@ final class ScreenRecorderFacade: NSObject {
     hasReceivedRecordingMicrophoneLevel = false
     refreshMicrophoneLevelMonitoring(resetMeter: false)
     recordedDurationTracker.reset()
-    currentRawURL = nil
-    activeRecordingFileSession = nil
     pendingMetadata = nil
     pendingCameraRecordingSession = nil
     currentCaptureDisplayID = nil
@@ -3382,6 +3334,9 @@ final class ScreenRecorderFacade: NSObject {
     onRecordingStateChanged?(false)
 
     if let error {
+      if let projectRoot = activeRecordingProjectRoot {
+        updateProjectManifestStatus(.failed, projectRoot: projectRoot)
+      }
       if let sessionId = activeRecordingWorkflowSessionId {
         onRecordingFailed?([
           "type": "recordingFailed",
@@ -3403,21 +3358,30 @@ final class ScreenRecorderFacade: NSObject {
         context: ["error": error.localizedDescription]
       )
       completion?(flutterError(NativeErrorCode.recordingError, error.localizedDescription))
+      activeRecordingProjectRoot = nil
       activeRecordingWorkflowSessionId = nil
       return
     }
 
-    if let path = finalURL?.path, let sessionId = activeRecordingWorkflowSessionId {
-      NativeLogger.i("Facade", "Triggering onRecordingFinalized callback", context: ["path": path])
-      onRecordingFinalized?(sessionId, path)
+    if let projectPath = activeRecordingProjectRoot?.path, let sessionId = activeRecordingWorkflowSessionId {
+      NativeLogger.i(
+        "Facade",
+        "Triggering onRecordingFinalized callback",
+        context: ["projectPath": projectPath]
+      )
+      onRecordingFinalized?(sessionId, projectPath)
     }
 
     NativeLogger.i(
       "Facade",
       "Recording finished successfully",
-      context: ["path": finalURL?.path ?? "nil"]
+      context: [
+        "projectPath": activeRecordingProjectRoot?.path ?? "nil",
+        "screenPath": finalURL?.path ?? "nil",
+      ]
     )
-    completion?(finalURL?.path)
+    completion?(activeRecordingProjectRoot?.path)
+    activeRecordingProjectRoot = nil
     activeRecordingWorkflowSessionId = nil
   }
 
@@ -3431,17 +3395,16 @@ final class ScreenRecorderFacade: NSObject {
     // Bridge backend callbacks into the facade state machine.
     self.capture.onStarted = { [weak self] url in
       guard let self else { return }
-      let visibleRawURL = self.activeRecordingFileSession?.finalRawURL ?? url
+      let visibleProjectPath = self.activeRecordingProjectRoot?.path ?? url.path
 
       self.resetOverlayUpdateDeduper()
       self.state = .recording
       self.recordedDurationTracker.start()
       self.stateAsStr()
       self.refreshMicrophoneLevelMonitoring(resetMeter: false)
-      self.currentRawURL = visibleRawURL
 
       // Write metadata sidecar when recording starts
-      self.writeMetadataSidecar(for: url)
+      self.writeMetadataSidecar()
       self.writeCameraMetadataSidecarIfNeeded()
 
       self.onRecordingStateChanged?(true)
@@ -3460,7 +3423,7 @@ final class ScreenRecorderFacade: NSObject {
 
       self.updateCursorVisibility()
 
-      self.startResult?(visibleRawURL.path)
+      self.startResult?(visibleProjectPath)
       self.startResult = nil
 
       self.drainPendingStopIfNeeded()
@@ -3525,25 +3488,15 @@ final class ScreenRecorderFacade: NSObject {
 
       let finalizeWithCameraResult: (CameraRecordingResult?) -> Void = { cameraResult in
         var finalURL: URL? = url
-        if let rawURL = url {
-          let publishedScreenURL = self.activeRecordingFileSession?.finalRawURL ?? rawURL
+        if let projectRoot = self.activeRecordingProjectRoot, let rawURL = url {
+          self.updateProjectManifestStatus(.finalizing, projectRoot: projectRoot)
           self.updateMetadataSidecarOnFinish(
-            for: rawURL,
+            projectRoot: projectRoot,
             cameraResult: cameraResult,
-            publishedScreenURL: publishedScreenURL
+            publishedScreenURL: rawURL
           )
-          do {
-            finalURL = try self.finalizeRecordingArtifactsIfNeeded(recordedRawURL: rawURL)
-          } catch {
-            NativeLogger.e(
-              "Facade", "Failed to promote recording artifacts",
-              context: [
-                "tempRaw": rawURL.path,
-                "finalRaw": self.activeRecordingFileSession?.finalRawURL.path ?? "nil",
-                "error": error.localizedDescription,
-              ])
-            finalURL = rawURL
-          }
+          self.updateProjectManifestStatus(.ready, projectRoot: projectRoot)
+          finalURL = rawURL
         }
 
         self.completeRecordingLifecycle(
@@ -3627,13 +3580,17 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   /// Writes the metadata sidecar file when recording starts.
-  private func writeMetadataSidecar(for rawURL: URL) {
+  private func writeMetadataSidecar() {
     guard let metadata = pendingMetadata else {
       NativeLogger.w("Facade", "No pending metadata to write")
       return
     }
+    guard let projectRoot = activeRecordingProjectRoot else {
+      NativeLogger.w("Facade", "No active recording project to write metadata into")
+      return
+    }
 
-    let metaURL = AppPaths.metadataSidecarURL(for: rawURL)
+    let metaURL = RecordingProjectPaths.screenMetadataURL(for: projectRoot)
     do {
       try metadata.write(to: metaURL)
       NativeLogger.d(
@@ -3666,13 +3623,13 @@ final class ScreenRecorderFacade: NSObject {
 
   private func cameraCaptureInfo(
     from result: CameraRecordingResult,
-    screenRawURL: URL
+    screenRawURL _: URL
   ) -> RecordingMetadata.CameraCaptureInfo {
     RecordingMetadata.CameraCaptureInfo(
       mode: .separateCameraAsset,
       enabled: true,
-      rawRelativePath: AppPaths.cameraRawURL(for: screenRawURL).lastPathComponent,
-      metadataRelativePath: AppPaths.cameraMetadataSidecarURL(for: screenRawURL).lastPathComponent,
+      rawRelativePath: RecordingProjectPaths.relativeCameraRawPath,
+      metadataRelativePath: RecordingProjectPaths.relativeCameraMetadataPath,
       deviceId: result.metadata.deviceId,
       mirroredRaw: result.metadata.mirroredRaw,
       nominalFrameRate: result.metadata.nominalFrameRate,
@@ -3685,11 +3642,11 @@ final class ScreenRecorderFacade: NSObject {
 
   /// Updates the metadata sidecar with end timestamp when recording finishes.
   private func updateMetadataSidecarOnFinish(
-    for rawURL: URL,
+    projectRoot: URL,
     cameraResult: CameraRecordingResult?,
     publishedScreenURL: URL
   ) {
-    let metaURL = AppPaths.metadataSidecarURL(for: rawURL)
+    let metaURL = RecordingProjectPaths.screenMetadataURL(for: projectRoot)
 
     // Read existing metadata and update with end timestamp
     do {
@@ -3713,6 +3670,36 @@ final class ScreenRecorderFacade: NSObject {
     }
   }
 
+  private func updateProjectManifestStatus(
+    _ status: RecordingProjectStatus,
+    projectRoot: URL
+  ) {
+    let manifestURL = RecordingProjectPaths.manifestURL(for: projectRoot)
+    guard var manifest = try? RecordingProjectManifest.read(from: manifestURL) else {
+      NativeLogger.w(
+        "Facade",
+        "Could not update recording project manifest status",
+        context: ["path": manifestURL.path, "status": status.rawValue]
+      )
+      return
+    }
+
+    manifest.updateStatus(status)
+    do {
+      try manifest.write(to: manifestURL)
+    } catch {
+      NativeLogger.w(
+        "Facade",
+        "Failed writing recording project manifest status",
+        context: [
+          "path": manifestURL.path,
+          "status": status.rawValue,
+          "error": error.localizedDescription,
+        ]
+      )
+    }
+  }
+
 #if DEBUG
   func _testBuildCaptureStartConfig(
     target: CaptureTarget,
@@ -3731,12 +3718,12 @@ final class ScreenRecorderFacade: NSObject {
   }
 
   func _testUpdateMetadataSidecarOnFinish(
-    for rawURL: URL,
+    projectRoot: URL,
     cameraResult: CameraRecordingResult?,
     publishedScreenURL: URL
   ) {
     updateMetadataSidecarOnFinish(
-      for: rawURL,
+      projectRoot: projectRoot,
       cameraResult: cameraResult,
       publishedScreenURL: publishedScreenURL
     )
