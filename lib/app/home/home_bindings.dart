@@ -48,8 +48,7 @@ class HomeBindings {
     if (event is KeyDownEvent &&
         countdownController.isActive &&
         event.logicalKey == LogicalKeyboardKey.escape) {
-      countdownController.cancel();
-      recordingController.cancelPendingStartIntent();
+      unawaited(onToggleRecording());
       return true;
     }
     return false;

@@ -15,7 +15,9 @@ import 'package:clingfy/commercial/licensing/license_controller.dart';
 import 'package:clingfy/core/bridges/native_bridge.dart';
 import 'package:clingfy/core/bridges/native_method_channel.dart';
 import 'package:clingfy/core/devices/device_controller.dart';
+import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/core/preview/player_controller.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -98,7 +100,13 @@ void main() {
     await clearCommonNativeMocks();
   });
 
-  Future<_Harness> createHarness() async {
+  Future<_Harness> createHarness({
+    Future<void> Function(
+      CountdownController countdown,
+      RecordingController recording,
+    )?
+    onToggleRecording,
+  }) async {
     final nativeBridge = NativeBridge.instance;
     final settings = SettingsController(nativeBridge: nativeBridge);
     await settings.loadPreferences();
@@ -133,7 +141,9 @@ void main() {
         uiState: uiState,
         prefsStore: HomePrefsStore(),
       ),
-      onToggleRecording: () async {},
+      onToggleRecording: () async {
+        await onToggleRecording?.call(countdown, recording);
+      },
       onRecordingFinalized: (_) async {},
       onExportProgress: (_) {},
       onHandleNativeBarAction: (_, __) {},
@@ -197,6 +207,40 @@ void main() {
 
       expect(pauseCalls, 1);
       expect(harness.recording.pauseResumeInFlight, isTrue);
+    },
+  );
+
+  testWidgets(
+    'escape during countdown routes through toggle callback and returns idle',
+    (tester) async {
+      var toggleCalls = 0;
+      final harness = await createHarness(
+        onToggleRecording: (countdown, recording) async {
+          toggleCalls += 1;
+          countdown.cancel();
+          recording.cancelPendingStartIntent();
+        },
+      );
+      addTearDown(harness.dispose);
+
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: SizedBox())),
+      );
+
+      harness.bindings.bind();
+      harness.recording.beginRecordingStartIntent();
+      harness.countdown.start(durationSeconds: 5, onFinished: () {});
+
+      expect(harness.recording.phase, WorkflowPhase.startingRecording);
+      expect(harness.countdown.isActive, isTrue);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      expect(toggleCalls, 1);
+      expect(harness.countdown.isActive, isFalse);
+      expect(harness.recording.phase, WorkflowPhase.idle);
     },
   );
 }

@@ -102,6 +102,11 @@ class HomeActions {
       postProcessingController.togglePlayback();
       return;
     }
+    if (countdownController.isActive) {
+      countdownController.cancel();
+      recordingController.cancelPendingStartIntent();
+      return;
+    }
     if (recordingController.isBusy || recordingController.isExporting) return;
 
     uiState.clearError();
@@ -109,11 +114,6 @@ class HomeActions {
 
     try {
       if (!recordingController.isRecording) {
-        if (countdownController.isActive) {
-          countdownController.cancel();
-          recordingController.cancelPendingStartIntent();
-          return;
-        }
         final overrides = await _resolveRecordingStartOverrides(context);
         if (overrides == null) {
           return;
@@ -264,7 +264,7 @@ class HomeActions {
           ? l10n.errExportInputMissing
           : e.code == NativeErrorCode.advancedCameraExportFailed
           ? (e.message ??
-              'Advanced camera styling could not be rendered for export.')
+                'Advanced camera styling could not be rendered for export.')
           : l10n.errExportError(e.message ?? 'Unknown error');
 
       uiState.setNotice(

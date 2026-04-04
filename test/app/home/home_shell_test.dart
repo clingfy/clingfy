@@ -21,6 +21,7 @@ import 'package:clingfy/commercial/licensing/license_controller.dart';
 import 'package:clingfy/core/bridges/native_bridge.dart';
 import 'package:clingfy/core/bridges/native_method_channel.dart';
 import 'package:clingfy/core/devices/device_controller.dart';
+import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/core/preview/player_controller.dart';
 import 'package:clingfy/l10n/app_localizations.dart';
 import 'package:clingfy/ui/platform/widgets/app_sidebar_tokens.dart';
@@ -1215,6 +1216,108 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'countdown overlay cancel returns the hero to idle without starting recording',
+    (tester) async {
+      _setDesktopWindow(tester);
+      final harness = await createHarness();
+
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.player.dispose);
+      addTearDown(harness.device.dispose);
+      addTearDown(harness.overlay.dispose);
+      addTearDown(harness.permissions.dispose);
+      addTearDown(harness.post.dispose);
+      addTearDown(harness.license.dispose);
+      addTearDown(harness.countdown.dispose);
+      addTearDown(harness.uiState.dispose);
+      addTearDown(harness.settings.dispose);
+
+      await harness.settings.recording.updateCountdownEnabled(true);
+      await harness.settings.recording.updateCountdownDuration(5);
+
+      var startRecordingCalls = 0;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(screenRecorderChannel, (call) async {
+        switch (call.method) {
+          case 'getPermissionStatus':
+            return <String, bool>{
+              'screenRecording': true,
+              'microphone': false,
+              'camera': false,
+              'accessibility': false,
+            };
+          case 'getStorageSnapshot':
+            return <String, dynamic>{
+              'systemTotalBytes': 500 * 1024 * 1024 * 1024,
+              'systemAvailableBytes': 200 * 1024 * 1024 * 1024,
+              'recordingsBytes': 4 * 1024 * 1024,
+              'tempBytes': 2 * 1024 * 1024,
+              'logsBytes': 512 * 1024,
+              'recordingsPath': '/tmp/Clingfy/Recordings',
+              'tempPath': '/tmp/Clingfy/Temp',
+              'logsPath': '/tmp/Clingfy/Logs',
+              'warningThresholdBytes': 20 * 1024 * 1024 * 1024,
+              'criticalThresholdBytes': 10 * 1024 * 1024 * 1024,
+            };
+          case 'startRecording':
+            startRecordingCalls += 1;
+            return null;
+          default:
+            return null;
+        }
+      });
+
+      await tester.pumpWidget(
+        buildShell(
+          actions: harness.actions,
+          countdown: harness.countdown,
+          device: harness.device,
+          license: harness.license,
+          overlay: harness.overlay,
+          player: harness.player,
+          post: harness.post,
+          recording: harness.recording,
+          settings: harness.settings,
+          uiState: harness.uiState,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(HomeShell)))!;
+
+      await tester.tap(find.widgetWithText(FilledButton, l10n.startRecording));
+      await tester.pump();
+      await tester.pump();
+
+      expect(harness.countdown.isActive, isTrue);
+      expect(harness.recording.phase, WorkflowPhase.startingRecording);
+      expect(find.widgetWithText(FilledButton, l10n.cancel), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, l10n.cancel));
+      await tester.pump();
+      await tester.pump();
+
+      expect(harness.countdown.isActive, isFalse);
+      expect(harness.recording.phase, WorkflowPhase.idle);
+      expect(find.widgetWithText(FilledButton, l10n.cancel), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      final startButton = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, l10n.startRecording),
+      );
+      expect(startButton.onPressed, isNotNull);
+
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+
+      expect(startRecordingCalls, 0);
+      expect(harness.recording.phase, WorkflowPhase.idle);
+    },
+  );
 
   testWidgets(
     'short preview shells fall back to vertical scrolling without clipping',

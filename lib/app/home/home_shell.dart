@@ -122,6 +122,10 @@ class _HomeShellState extends State<HomeShell> {
 
   void _showPane(DesktopPaneSpec spec) => _setPaneCollapsed(spec, false);
 
+  void _toggleRecordingFromUi(BuildContext context) {
+    unawaited(widget.actions.toggleRecording(context));
+  }
+
   void _selectRecordingSection(int index) {
     widget.uiState.setRecordingSidebarIndex(index);
     if (_paneController.stateFor(_recordingInspectorPaneSpec.id).isCollapsed) {
@@ -338,14 +342,10 @@ class _HomeShellState extends State<HomeShell> {
                                                       isBusy: isBusy,
                                                       canPause: canPause,
                                                       canResume: canResume,
-                                                      onToggleRecording: () async {
-                                                        unawaited(
-                                                          widget.actions
-                                                              .toggleRecording(
-                                                                context,
-                                                              ),
-                                                        );
-                                                      },
+                                                      onToggleRecording: () =>
+                                                          _toggleRecordingFromUi(
+                                                            context,
+                                                          ),
                                                       onPauseRecording: () {
                                                         unawaited(
                                                           widget
@@ -421,6 +421,7 @@ class _HomeShellState extends State<HomeShell> {
         floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
         floatingActionButton: CountdownOverlay(
           controller: widget.countdownController,
+          onCancel: () => _toggleRecordingFromUi(context),
         ),
       ),
     );
