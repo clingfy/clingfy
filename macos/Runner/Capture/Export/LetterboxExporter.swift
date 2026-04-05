@@ -2,20 +2,423 @@ import AVFoundation
 import AppKit
 import QuartzCore
 
+// Orchestrates export stages; camera-only pixel preprocessing stays in the pre-pass pipeline.
 final class LetterboxExporter {
+  private struct FrameContentMetrics {
+    let totalPixels: Int
+    let visiblePixels: Int
+    let nonBlackVisiblePixels: Int
+
+    var visibleRatio: Double {
+      guard totalPixels > 0 else { return 0.0 }
+      return Double(visiblePixels) / Double(totalPixels)
+    }
+
+    var nonBlackVisibleRatio: Double {
+      guard visiblePixels > 0 else { return 0.0 }
+      return Double(nonBlackVisiblePixels) / Double(visiblePixels)
+    }
+  }
+
   private let builder = CompositionBuilder()
+  private let cameraPrepassPipeline = CameraStyledIntermediatePipeline()
   private var currentSession: AVAssetExportSession?
   private var progressTimer: Timer?
+  private var temporaryArtifacts: [URL] = []
+  private var isCancelled = false
+  private let validationSampleDimension = 64
+  private let validationAlphaThreshold: UInt8 = 8
+  private let validationNonBlackThreshold: UInt8 = 12
 
   func cancel() {
+    isCancelled = true
     progressTimer?.invalidate()
     progressTimer = nil
     currentSession?.cancelExport()
     currentSession = nil
   }
 
+  private func registerTemporaryArtifact(_ url: URL) {
+    if !temporaryArtifacts.contains(url) {
+      temporaryArtifacts.append(url)
+    }
+  }
+
+  private func cleanupTemporaryArtifacts() {
+    let fileManager = FileManager.default
+    for url in Set(temporaryArtifacts) {
+      if fileManager.fileExists(atPath: url.path) {
+        try? fileManager.removeItem(at: url)
+        NativeLogger.d(
+          "Export",
+          "Cleaned up temporary export artifact",
+          context: ["path": url.path]
+        )
+      }
+    }
+    temporaryArtifacts.removeAll()
+  }
+
+  private func removeFileIfExists(_ url: URL) {
+    if FileManager.default.fileExists(atPath: url.path) {
+      try? FileManager.default.removeItem(at: url)
+    }
+  }
+
+  private func formattedBackgroundColor(_ color: Int?) -> String {
+    guard let color else { return "nil" }
+    return String(format: "0x%08X", color)
+  }
+
+  private func validationSampleTime(for asset: AVAsset) -> CMTime {
+    let seconds = asset.duration.seconds
+    guard seconds.isFinite, seconds > 0 else { return .zero }
+    return CMTime(seconds: min(1.0, seconds / 2.0), preferredTimescale: 600)
+  }
+
+  private func sampleFrameImage(asset: AVAsset) throws -> CGImage {
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = CGSize(
+      width: validationSampleDimension,
+      height: validationSampleDimension
+    )
+    return try generator.copyCGImage(at: validationSampleTime(for: asset), actualTime: nil)
+  }
+
+  private func orientedSize(for asset: AVAsset) -> CGSize? {
+    guard let track = asset.tracks(withMediaType: .video).first else { return nil }
+    let rect = CGRect(origin: .zero, size: track.naturalSize).applying(track.preferredTransform)
+    return CGSize(width: abs(rect.width), height: abs(rect.height))
+  }
+
+  private func analyzeFrameContent(
+    _ image: CGImage,
+    ignoreTransparentPixels: Bool
+  ) -> FrameContentMetrics? {
+    let width = validationSampleDimension
+    let height = validationSampleDimension
+    let bytesPerRow = width * 4
+    var buffer = [UInt8](repeating: 0, count: height * bytesPerRow)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+    var metrics: FrameContentMetrics?
+    buffer.withUnsafeMutableBytes { rawBuffer in
+      guard
+        let baseAddress = rawBuffer.baseAddress,
+        let context = CGContext(
+          data: baseAddress,
+          width: width,
+          height: height,
+          bitsPerComponent: 8,
+          bytesPerRow: bytesPerRow,
+          space: colorSpace,
+          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            | CGBitmapInfo.byteOrder32Big.rawValue
+        )
+      else {
+        return
+      }
+
+      context.interpolationQuality = .medium
+      context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+      let pixelBytes = rawBuffer.bindMemory(to: UInt8.self)
+
+      var visiblePixels = 0
+      var nonBlackVisiblePixels = 0
+
+      for pixelIndex in 0..<(width * height) {
+        let offset = pixelIndex * 4
+        let alpha = pixelBytes[offset + 3]
+        let isVisible = !ignoreTransparentPixels || alpha > validationAlphaThreshold
+        if !isVisible {
+          continue
+        }
+
+        visiblePixels += 1
+        let red = pixelBytes[offset]
+        let green = pixelBytes[offset + 1]
+        let blue = pixelBytes[offset + 2]
+        if max(red, max(green, blue)) > validationNonBlackThreshold {
+          nonBlackVisiblePixels += 1
+        }
+      }
+
+      metrics = FrameContentMetrics(
+        totalPixels: width * height,
+        visiblePixels: visiblePixels,
+        nonBlackVisiblePixels: nonBlackVisiblePixels
+      )
+    }
+
+    return metrics
+  }
+
+  private func croppedImageVariants(
+    from image: CGImage,
+    cropRect: CGRect,
+    canvasSize: CGSize
+  ) -> [CGImage] {
+    let imageBounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+    let scaleX = CGFloat(image.width) / max(canvasSize.width, 1.0)
+    let scaleY = CGFloat(image.height) / max(canvasSize.height, 1.0)
+
+    return [false, true].compactMap { flipY in
+      let sourceY = flipY ? (canvasSize.height - cropRect.maxY) : cropRect.minY
+      let pixelRect = CGRect(
+        x: cropRect.minX * scaleX,
+        y: sourceY * scaleY,
+        width: cropRect.width * scaleX,
+        height: cropRect.height * scaleY
+      ).integral.intersection(imageBounds)
+
+      guard pixelRect.width >= 1.0, pixelRect.height >= 1.0 else { return nil }
+      return image.cropping(to: pixelRect)
+    }
+  }
+
+  private func bestMetrics(
+    from image: CGImage,
+    cropRect: CGRect?,
+    canvasSize: CGSize,
+    ignoreTransparentPixels: Bool
+  ) -> FrameContentMetrics? {
+    let candidateImages: [CGImage]
+    if let cropRect {
+      candidateImages = croppedImageVariants(
+        from: image,
+        cropRect: cropRect,
+        canvasSize: canvasSize
+      )
+    } else {
+      candidateImages = [image]
+    }
+
+    return candidateImages
+      .compactMap { analyzeFrameContent($0, ignoreTransparentPixels: ignoreTransparentPixels) }
+      .max(by: { lhs, rhs in
+        lhs.nonBlackVisibleRatio < rhs.nonBlackVisibleRatio
+      })
+  }
+
+  private func validateStyledCameraIntermediate(
+    rawCameraAsset: AVAsset,
+    styledCameraAsset: AVAsset,
+    placementSourceRect: CGRect?
+  ) -> NSError? {
+    do {
+      let rawImage = try sampleFrameImage(asset: rawCameraAsset)
+      let styledImage = try sampleFrameImage(asset: styledCameraAsset)
+      let styledCanvasSize = orientedSize(for: styledCameraAsset)
+        ?? CGSize(width: styledImage.width, height: styledImage.height)
+
+      guard
+        let rawMetrics = analyzeFrameContent(rawImage, ignoreTransparentPixels: false),
+        let styledMetrics = bestMetrics(
+          from: styledImage,
+          cropRect: placementSourceRect,
+          canvasSize: styledCanvasSize,
+          ignoreTransparentPixels: true
+        )
+      else {
+        return makeAdvancedCameraExportError(
+          stage: .styledIntermediateValidation,
+          reason: "The camera export validator could not analyze the rendered frame."
+        )
+      }
+
+      NativeLogger.d(
+        "Export",
+        "Styled camera validation metrics",
+        context: [
+          "rawVisibleRatio": rawMetrics.visibleRatio,
+          "rawNonBlackRatio": rawMetrics.nonBlackVisibleRatio,
+          "styledVisibleRatio": styledMetrics.visibleRatio,
+          "styledNonBlackRatio": styledMetrics.nonBlackVisibleRatio,
+        ]
+      )
+
+      guard rawMetrics.nonBlackVisibleRatio >= 0.05 else {
+        return nil
+      }
+
+      if styledMetrics.visiblePixels == 0 || styledMetrics.nonBlackVisibleRatio < 0.01 {
+        return makeAdvancedCameraExportError(
+          stage: .styledIntermediateValidation,
+          reason: "The styled camera intermediate rendered blank or black video.",
+          context: [
+            "rawNonBlackRatio": rawMetrics.nonBlackVisibleRatio,
+            "styledVisibleRatio": styledMetrics.visibleRatio,
+            "styledNonBlackRatio": styledMetrics.nonBlackVisibleRatio,
+          ]
+        )
+      }
+
+      return nil
+    } catch {
+      return makeAdvancedCameraExportError(
+        stage: .styledIntermediateValidation,
+        reason: "The camera export validator could not sample the styled intermediate.",
+        context: ["error": error.localizedDescription]
+      )
+    }
+  }
+
+  private func validateFinalStyledCameraExport(
+    styledCameraAsset: AVAsset,
+    finalExportAsset: AVAsset,
+    canvasSize: CGSize,
+    cameraParams: CameraCompositionParams,
+    placementSourceRect: CGRect?
+  ) -> NSError? {
+    let resolution = CameraLayoutResolver.effectiveFrame(
+      canvasSize: canvasSize,
+      params: cameraParams
+    )
+    guard resolution.shouldRender else { return nil }
+
+    do {
+      let styledImage = try sampleFrameImage(asset: styledCameraAsset)
+      let finalImage = try sampleFrameImage(asset: finalExportAsset)
+      let styledCanvasSize = orientedSize(for: styledCameraAsset)
+        ?? CGSize(width: styledImage.width, height: styledImage.height)
+
+      guard let styledMetrics = bestMetrics(
+        from: styledImage,
+        cropRect: placementSourceRect,
+        canvasSize: styledCanvasSize,
+        ignoreTransparentPixels: true
+      ) else {
+        return makeAdvancedCameraExportError(
+          stage: .finalOutputValidation,
+          reason: "The final export validator could not analyze the styled camera frame."
+        )
+      }
+
+      guard styledMetrics.nonBlackVisibleRatio >= 0.05 else {
+        return nil
+      }
+
+      let cropMetrics = croppedImageVariants(
+        from: finalImage,
+        cropRect: resolution.frame,
+        canvasSize: canvasSize
+      ).compactMap {
+        analyzeFrameContent($0, ignoreTransparentPixels: false)
+      }
+
+      guard let bestCropMetrics = cropMetrics.max(by: { lhs, rhs in
+        lhs.nonBlackVisibleRatio < rhs.nonBlackVisibleRatio
+      }) else {
+        return makeAdvancedCameraExportError(
+          stage: .finalOutputValidation,
+          reason: "The final export validator could not read the exported camera region."
+        )
+      }
+
+      let requiredNonBlackRatio = max(0.01, styledMetrics.nonBlackVisibleRatio * 0.2)
+
+      NativeLogger.d(
+        "Export",
+        "Final styled camera validation metrics",
+        context: [
+          "styledNonBlackRatio": styledMetrics.nonBlackVisibleRatio,
+          "finalCropNonBlackRatio": bestCropMetrics.nonBlackVisibleRatio,
+          "requiredNonBlackRatio": requiredNonBlackRatio,
+        ]
+      )
+
+      guard bestCropMetrics.nonBlackVisibleRatio >= requiredNonBlackRatio else {
+        return makeAdvancedCameraExportError(
+          stage: .finalOutputValidation,
+          reason: "The final exported camera region rendered blank or black video.",
+          context: [
+            "styledNonBlackRatio": styledMetrics.nonBlackVisibleRatio,
+            "finalCropNonBlackRatio": bestCropMetrics.nonBlackVisibleRatio,
+            "requiredNonBlackRatio": requiredNonBlackRatio,
+          ]
+        )
+      }
+
+      return nil
+    } catch {
+      return makeAdvancedCameraExportError(
+        stage: .finalOutputValidation,
+        reason: "The final export validator could not sample the exported file.",
+        context: ["error": error.localizedDescription]
+      )
+    }
+  }
+
+  private func runExportSession(
+    _ export: AVAssetExportSession,
+    outputURL: URL,
+    progressRange: ClosedRange<Double>,
+    onProgress: ((Double) -> Void)?,
+    logOutputInfo: Bool = false,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    self.currentSession = export
+
+    let lower = progressRange.lowerBound
+    let span = progressRange.upperBound - progressRange.lowerBound
+    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak export] _ in
+      guard let export else { return }
+      onProgress?(lower + (Double(export.progress) * span))
+    }
+
+    export.exportAsynchronously { [weak self] in
+      DispatchQueue.main.async {
+        self?.progressTimer?.invalidate()
+        self?.progressTimer = nil
+        self?.currentSession = nil
+
+        switch export.status {
+        case .completed:
+          onProgress?(progressRange.upperBound)
+          if logOutputInfo {
+            self?.logExportedFileInfo(url: outputURL)
+          }
+          completion(.success(outputURL))
+
+        case .cancelled:
+          completion(
+            .failure(
+              NSError(
+                domain: "Letterbox",
+                code: -999,
+                userInfo: [NSLocalizedDescriptionKey: "Export cancelled"]
+              )
+            )
+          )
+        case .failed:
+          completion(
+            .failure(
+              export.error
+                ?? NSError(
+                  domain: "Letterbox",
+                  code: -3,
+                  userInfo: [NSLocalizedDescriptionKey: "Export failed"]
+                )
+            )
+          )
+        default:
+          completion(
+            .failure(
+              NSError(
+                domain: "Letterbox",
+                code: -4,
+                userInfo: [NSLocalizedDescriptionKey: "Export ended in unexpected state \(export.status.rawValue)"]
+              )
+            )
+          )
+        }
+      }
+    }
+  }
+
   func export(
-    inputURL: URL,
+    project: RecordingProjectRef,
     target: CGSize,
     padding: Double = 0,
     cornerRadius: Double = 0,
@@ -36,19 +439,25 @@ final class LetterboxExporter {
     audioVolumePercent: Double = 100.0,
     autoNormalizeOnExport: Bool = false,
     targetLoudnessDbfs: Double = -16.0,
+    cameraParams: CameraCompositionParams? = nil,
     onProgress: ((Double) -> Void)? = nil,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
     // Cancel any existing session
     cancel()
+    isCancelled = false
+
+    let mediaSources = project.mediaSources()
+    let inputURL = mediaSources.screenVideoURL
+    let cameraInputURL = mediaSources.cameraVideoURL
 
     let asset = AVAsset(url: inputURL)
 
     // Load cursor recording if needed (gracefully handle missing cursor file)
     var cursorRecording: CursorRecording?
     if showCursor {
-      let cursorDataURL = AppPaths.cursorSidecarURL(for: inputURL)
-      if let data = try? Data(contentsOf: cursorDataURL),
+      if let cursorDataURL = mediaSources.cursorDataURL,
+        let data = try? Data(contentsOf: cursorDataURL),
         let recording = try? JSONDecoder().decode(CursorRecording.self, from: data)
       {
         cursorRecording = recording
@@ -59,16 +468,16 @@ final class LetterboxExporter {
         // Cursor file missing - this is OK, we just proceed without cursor overlay
         NativeLogger.i(
           "Export", "Cursor data missing or invalid, proceeding without cursor overlay",
-          context: ["expectedPath": cursorDataURL.lastPathComponent])
+          context: ["expectedPath": mediaSources.cursorPath ?? "nil"])
       }
     }
 
     // Load manual segments
-    let manualURL = AppPaths.zoomManualSidecarURL(for: inputURL)
     var manualSegments: [ZoomTimelineSegment] = []
     var overriddenAutoIds: Set<String> = []
 
-    if let data = try? Data(contentsOf: manualURL),
+    if let manualURL = mediaSources.zoomManualURL,
+      let data = try? Data(contentsOf: manualURL),
       let manualData = try? JSONDecoder().decode(ZoomManualData.self, from: data)
     {
       let allManual = manualData.segments
@@ -134,197 +543,338 @@ final class LetterboxExporter {
       targetLoudnessDbfs: targetLoudnessDbfs
     )
 
-    let compatible = Set(AVAssetExportSession.exportPresets(compatibleWith: asset))
-
-    func pickPreset(_ candidates: [String]) -> String {
-      for p in candidates where compatible.contains(p) { return p }
-      return AVAssetExportPresetHighestQuality
-    }
-
-    let useHevc = codec == "hevc"
-    let preset: String
-
     NativeLogger.i(
       "Export", "Export resolved",
       context: [
+        "projectPath": project.rootURL.path,
         "input": inputURL.path,
         "output": outputURL.path,
         "target": "\(Int(target.width))x\(Int(target.height))",
         "fpsHint": fpsHint,
         "format": format,
         "codec": codec,
+        "backgroundColor": formattedBackgroundColor(backgroundColor),
+        "backgroundImagePath": backgroundImagePath ?? "nil",
+        "hasCustomBackground": backgroundColor != nil || backgroundImagePath != nil,
       ])
 
-    if target.width >= 7680 || target.height >= 4320 {
-      // 8K
-      if #available(macOS 13.0, *) {
-        preset =
+    func pickPreset(for exportAsset: AVAsset) -> String {
+      let compatible = Set(AVAssetExportSession.exportPresets(compatibleWith: exportAsset))
+
+      func pick(_ candidates: [String]) -> String {
+        for candidate in candidates where compatible.contains(candidate) {
+          return candidate
+        }
+        return AVAssetExportPresetHighestQuality
+      }
+
+      let useHevc = codec == "hevc"
+      if target.width >= 7680 || target.height >= 4320 {
+        if #available(macOS 13.0, *) {
+          return
+            useHevc
+            ? pick([
+              "AVAssetExportPresetHEVC7680x4320",
+              AVAssetExportPresetHEVCHighestQuality,
+              AVAssetExportPresetHighestQuality,
+            ])
+            : pick([AVAssetExportPresetHighestQuality])
+        }
+        return
           useHevc
-          ? pickPreset([
-            "AVAssetExportPresetHEVC7680x4320", AVAssetExportPresetHEVCHighestQuality,
+          ? pick([AVAssetExportPresetHEVCHighestQuality, AVAssetExportPresetHighestQuality])
+          : pick([AVAssetExportPresetHighestQuality])
+      } else if target.width >= 3840 || target.height >= 2160 {
+        return
+          useHevc
+          ? pick([
+            AVAssetExportPresetHEVC3840x2160,
+            AVAssetExportPreset3840x2160,
+            AVAssetExportPresetHEVCHighestQuality,
             AVAssetExportPresetHighestQuality,
           ])
-          : pickPreset([AVAssetExportPresetHighestQuality])
-      } else {
-        preset =
+          : pick([AVAssetExportPreset3840x2160, AVAssetExportPresetHighestQuality])
+      } else if target.width >= 1920 || target.height >= 1080 {
+        return
           useHevc
-          ? pickPreset([AVAssetExportPresetHEVCHighestQuality, AVAssetExportPresetHighestQuality])
-          : pickPreset([AVAssetExportPresetHighestQuality])
+          ? pick([
+            AVAssetExportPresetHEVC1920x1080,
+            AVAssetExportPreset1920x1080,
+            AVAssetExportPresetHEVCHighestQuality,
+          ])
+          : pick([AVAssetExportPreset1920x1080, AVAssetExportPresetHighestQuality])
       }
-    } else if target.width >= 3840 || target.height >= 2160 {
-      // 4K
-      preset =
-        useHevc
-        ? pickPreset([
-          AVAssetExportPresetHEVC3840x2160,
-          AVAssetExportPreset3840x2160,
-          AVAssetExportPresetHEVCHighestQuality,
-          AVAssetExportPresetHighestQuality,
-        ])
-        : pickPreset([
-          AVAssetExportPreset3840x2160,
-          AVAssetExportPresetHighestQuality,
-        ])
-    } else if target.width >= 1920 || target.height >= 1080 {
-      // 1080p+
-      preset =
-        useHevc
-        ? pickPreset([
-          AVAssetExportPresetHEVC1920x1080,
-          AVAssetExportPreset1920x1080,
-          AVAssetExportPresetHEVCHighestQuality,
-        ])
-        : pickPreset([
-          AVAssetExportPreset1920x1080,
-          AVAssetExportPresetHighestQuality,
-        ])
-    } else {
-      preset =
-        useHevc
-        ? pickPreset([AVAssetExportPresetHEVCHighestQuality, AVAssetExportPresetHighestQuality])
-        : pickPreset([AVAssetExportPresetHighestQuality])
-    }
 
-    guard let export = AVAssetExportSession(asset: asset, presetName: preset) else {
-      completion(
-        .failure(
-          NSError(
-            domain: "Letterbox", code: -2,
-            userInfo: [NSLocalizedDescriptionKey: "Cannot create export session (preset=\(preset))"]
-          )))
       return
+        useHevc
+        ? pick([AVAssetExportPresetHEVCHighestQuality, AVAssetExportPresetHighestQuality])
+        : pick([AVAssetExportPresetHighestQuality])
     }
 
-    guard
-      let comp = builder.buildExport(asset: asset, params: params, cursorRecording: cursorRecording)
-    else {
-      completion(
-        .failure(
-          NSError(
-            domain: "Letterbox", code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Failed to build composition"])))
-      return
-    }
+    func beginFinalExport(
+      resolvedCameraInputURL: URL?,
+      progressRange: ClosedRange<Double>,
+      cameraAssetIsPreStyled: Bool,
+      cameraPlacementSourceRect: CGRect?
+    ) {
+      let cameraAsset = resolvedCameraInputURL.map(AVAsset.init(url:))
 
-    export.videoComposition = comp
+      if CameraPlacementDebug.enabled {
+        var context: [String: Any] = [
+          "resolvedCameraInputURL": resolvedCameraInputURL?.path ?? "nil",
+          "cameraAssetIsPreStyled": cameraAssetIsPreStyled,
+        ]
+        context.merge(
+          CameraPlacementDebug.sizeContext(prefix: "target", size: target),
+          uniquingKeysWith: { _, new in new }
+        )
+        context.merge(
+          CameraPlacementDebug.rectContext(
+            prefix: "cameraPlacementSourceRect",
+            rect: cameraPlacementSourceRect
+          ),
+          uniquingKeysWith: { _, new in new }
+        )
+        if let cameraParams {
+          context["cameraLayoutPreset"] = cameraParams.layoutPreset.rawValue
+          context["cameraSizeFactor"] = cameraParams.sizeFactor
+          context["cameraZoomBehavior"] = cameraParams.zoomBehavior.rawValue
+          context["cameraZoomScaleMultiplier"] = cameraParams.zoomScaleMultiplier
+          context["cameraShape"] = cameraParams.shape.rawValue
+          context["cameraShadowPreset"] = cameraParams.shadowPreset
+          context.merge(
+            CameraPlacementDebug.pointContext(
+              prefix: "cameraNormalizedCanvasCenter",
+              point: cameraParams.normalizedCanvasCenter
+            ),
+            uniquingKeysWith: { _, new in new }
+          )
+        }
 
-    export.audioMix = AudioMixEngine.makeAudioMix(
-      asset: asset,
-      volumePercent: resolvedAudioMix.volumePercent,
-      gainDb: resolvedAudioMix.gainDb
-    )
+        NativeLogger.d(
+          "CameraPlacementDbg",
+          "Final export camera request",
+          context: context
+        )
+      }
 
-    let requestedType = requestedFileType(for: format)
+      guard
+        let comp = builder.buildExport(
+          asset: asset,
+          cameraAsset: cameraAsset,
+          params: params,
+          cameraParams: cameraParams,
+          cursorRecording: cursorRecording,
+          cameraAssetIsPreStyled: cameraAssetIsPreStyled,
+          cameraPlacementSourceRect: cameraPlacementSourceRect
+        )
+      else {
+        cleanupTemporaryArtifacts()
+        completion(
+          .failure(
+            NSError(
+              domain: "Letterbox",
+              code: -1,
+              userInfo: [NSLocalizedDescriptionKey: "Failed to build composition"]
+            )
+          )
+        )
+        return
+      }
 
-    if let requestedType, export.supportedFileTypes.contains(requestedType) {
-      export.outputFileType = requestedType
-    } else if let first = export.supportedFileTypes.first {
-      export.outputFileType = first
-    } else {
-      completion(
-        .failure(
-          NSError(
-            domain: "Letterbox",
-            code: -10,
-            userInfo: [NSLocalizedDescriptionKey: "No supported output file types"]
-          )))
-      return
-    }
+      let preset = pickPreset(for: comp.asset)
+      guard let export = AVAssetExportSession(asset: comp.asset, presetName: preset) else {
+        cleanupTemporaryArtifacts()
+        completion(
+          .failure(
+            NSError(
+              domain: "Letterbox",
+              code: -2,
+              userInfo: [NSLocalizedDescriptionKey: "Cannot create export session (preset=\(preset))"]
+            )
+          )
+        )
+        return
+      }
 
-    // IMPORTANT: fix URL extension to match chosen outputFileType
-    let chosenType = export.outputFileType ?? .mov
-    let finalURL =
-      outputURL
-      .deletingPathExtension()
-      .appendingPathExtension(ext(for: chosenType))
+      export.videoComposition = comp.videoComposition
+      export.audioMix = AudioMixEngine.makeAudioMix(
+        asset: comp.asset,
+        volumePercent: resolvedAudioMix.volumePercent,
+        gainDb: resolvedAudioMix.gainDb
+      )
 
-    if FileManager.default.fileExists(atPath: finalURL.path) {
-      try? FileManager.default.removeItem(at: finalURL)
-    }
+      let requestedType = requestedFileType(for: format)
+      if let requestedType, export.supportedFileTypes.contains(requestedType) {
+        export.outputFileType = requestedType
+      } else if let first = export.supportedFileTypes.first {
+        export.outputFileType = first
+      } else {
+        cleanupTemporaryArtifacts()
+        completion(
+          .failure(
+            NSError(
+              domain: "Letterbox",
+              code: -10,
+              userInfo: [NSLocalizedDescriptionKey: "No supported output file types"]
+            )
+          )
+        )
+        return
+      }
 
-    export.outputURL = finalURL
+      let chosenType = export.outputFileType ?? .mov
+      let finalURL = outputURL
+        .deletingPathExtension()
+        .appendingPathExtension(ext(for: chosenType))
 
-    export.shouldOptimizeForNetworkUse = true
+      if FileManager.default.fileExists(atPath: finalURL.path) {
+        try? FileManager.default.removeItem(at: finalURL)
+      }
 
-    self.currentSession = export
+      export.outputURL = finalURL
+      export.shouldOptimizeForNetworkUse = true
 
-    NativeLogger.i(
-      "Export", "Export resolved",
-      context: [
-        "input": inputURL.path,
-        "output": outputURL.path,
-        "target": "\(Int(target.width))x\(Int(target.height))",
-        "renderSize": "\(Int(comp.renderSize.width))x\(Int(comp.renderSize.height))",
-        "fpsHint": fpsHint,
-        "format": format,
-        "codec": codec,
-        "bitrate": bitrate,
-        "autoNormalizeOnExport": autoNormalizeOnExport,
-        "targetLoudnessDbfs": targetLoudnessDbfs,
-        "resolvedGainDb": resolvedAudioMix.gainDb,
-        "resolvedVolumePercent": resolvedAudioMix.volumePercent,
-        "sourcePeakDbfs": resolvedAudioMix.sourcePeakDbfs ?? NSNull(),
-        "normalizationGainDb": resolvedAudioMix.normalizationGainDb ?? NSNull(),
-        "supportedTypes": export.supportedFileTypes.map { $0.rawValue },
-        "finalURL": finalURL.path,
-      ])
+      NativeLogger.i(
+        "Export",
+        "Starting final export session",
+        context: [
+          "input": inputURL.path,
+          "cameraInput": resolvedCameraInputURL?.path ?? "nil",
+          "cameraAssetIsPreStyled": cameraAssetIsPreStyled,
+          "output": outputURL.path,
+          "target": "\(Int(target.width))x\(Int(target.height))",
+          "renderSize":
+            "\(Int(comp.videoComposition.renderSize.width))x\(Int(comp.videoComposition.renderSize.height))",
+          "fpsHint": fpsHint,
+          "format": format,
+          "codec": codec,
+          "bitrate": bitrate,
+          "autoNormalizeOnExport": autoNormalizeOnExport,
+          "targetLoudnessDbfs": targetLoudnessDbfs,
+          "resolvedGainDb": resolvedAudioMix.gainDb,
+          "resolvedVolumePercent": resolvedAudioMix.volumePercent,
+          "sourcePeakDbfs": resolvedAudioMix.sourcePeakDbfs ?? NSNull(),
+          "normalizationGainDb": resolvedAudioMix.normalizationGainDb ?? NSNull(),
+          "backgroundColor": self.formattedBackgroundColor(backgroundColor),
+          "backgroundImagePath": backgroundImagePath ?? "nil",
+          "hasCustomBackground": backgroundColor != nil || backgroundImagePath != nil,
+          "supportedTypes": export.supportedFileTypes.map(\.rawValue),
+          "finalURL": finalURL.path,
+        ]
+      )
 
-    // Polling timer for progress
-    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak export] _ in
-      guard let export = export else { return }
-      onProgress?(Double(export.progress))
-    }
+      runExportSession(
+        export,
+        outputURL: finalURL,
+        progressRange: progressRange,
+        onProgress: onProgress,
+        logOutputInfo: true
+      ) { [weak self] result in
+        guard let self else {
+          completion(result)
+          return
+        }
 
-    export.exportAsynchronously { [weak self] in
-      DispatchQueue.main.async {
-        self?.progressTimer?.invalidate()
-        self?.progressTimer = nil
+        switch result {
+        case .success(let finalURL):
+          if cameraAssetIsPreStyled,
+            let resolvedCameraInputURL,
+            let cameraParams,
+            let validationError = self.validateFinalStyledCameraExport(
+              styledCameraAsset: AVAsset(url: resolvedCameraInputURL),
+              finalExportAsset: AVAsset(url: finalURL),
+              canvasSize: target,
+              cameraParams: cameraParams,
+              placementSourceRect: cameraPlacementSourceRect
+            )
+          {
+            NativeLogger.e(
+              "Export",
+              "Final styled camera export validation failed",
+              context: validationError.userInfo
+            )
+            self.removeFileIfExists(finalURL)
+            self.cleanupTemporaryArtifacts()
+            completion(.failure(validationError))
+            return
+          }
 
-        switch export.status {
-        case .completed:
-          onProgress?(1.0)
-          // Debug exported file quality
-          self?.logExportedFileInfo(url: finalURL)
+          self.cleanupTemporaryArtifacts()
           completion(.success(finalURL))
 
-        case .cancelled:
-          completion(
-            .failure(
-              NSError(
-                domain: "Letterbox", code: -999,
-                userInfo: [NSLocalizedDescriptionKey: "Export cancelled"])))
-        case .failed:
-          completion(
-            .failure(
-              export.error
-                ?? NSError(
-                  domain: "Letterbox", code: -3,
-                  userInfo: [NSLocalizedDescriptionKey: "Export failed"])))
-        default: break
+        case .failure(let error):
+          self.cleanupTemporaryArtifacts()
+          completion(.failure(error))
         }
-        self?.currentSession = nil
       }
     }
+
+    if let cameraInputURL,
+      let cameraParams,
+      cameraPrepassPipeline.requiresPrepass(cameraParams: cameraParams)
+    {
+      let cameraAsset = AVAsset(url: cameraInputURL)
+      cameraPrepassPipeline.prepareIntermediate(
+        inputURL: cameraInputURL,
+        canvasSize: target,
+        params: cameraParams,
+        fpsHint: fpsHint,
+        isCancelled: { [weak self] in self?.isCancelled ?? true },
+        onProgress: { progress in
+          onProgress?(progress * 0.35)
+        }
+      ) { [weak self] result in
+        switch result {
+        case .success(let prepared):
+          prepared.temporaryArtifacts.forEach { self?.registerTemporaryArtifact($0) }
+
+          if let validationError = self?.validateStyledCameraIntermediate(
+            rawCameraAsset: cameraAsset,
+            styledCameraAsset: AVAsset(url: prepared.url),
+            placementSourceRect: prepared.placementSourceRect
+          ) {
+            NativeLogger.e(
+              "Export",
+              "Camera pre-pass validation failed",
+              context: validationError.userInfo
+            )
+            self?.cleanupTemporaryArtifacts()
+            completion(.failure(validationError))
+            return
+          }
+
+          NativeLogger.i(
+            "Export",
+            "Camera pre-pass intermediate ready",
+            context: [
+              "path": prepared.url.path,
+              "cameraAssetIsPreStyled": prepared.cameraAssetIsPreStyled,
+              "placementSourceRect": NSStringFromRect(prepared.placementSourceRect ?? .zero),
+            ]
+          )
+
+          beginFinalExport(
+            resolvedCameraInputURL: prepared.url,
+            progressRange: 0.35...1.0,
+            cameraAssetIsPreStyled: prepared.cameraAssetIsPreStyled,
+            cameraPlacementSourceRect: prepared.placementSourceRect
+          )
+
+        case .failure(let error):
+          self?.cleanupTemporaryArtifacts()
+          completion(.failure(error))
+        }
+      }
+      return
+    }
+
+    beginFinalExport(
+      resolvedCameraInputURL: cameraInputURL,
+      progressRange: 0.0...1.0,
+      cameraAssetIsPreStyled: false,
+      cameraPlacementSourceRect: nil
+    )
   }
 
   private struct ResolvedAudioMixControls {
@@ -495,5 +1045,57 @@ final class LetterboxExporter {
         "bitrate_from_file_bps": bpsFromFile,
       ])
   }
+
+#if DEBUG
+  func _testShouldUseCameraPrepass(cameraParams: CameraCompositionParams?) -> Bool {
+    cameraPrepassPipeline.requiresPrepass(cameraParams: cameraParams)
+  }
+
+  func _testPrepareCameraIntermediate(
+    inputURL: URL,
+    canvasSize: CGSize,
+    cameraParams: CameraCompositionParams,
+    fpsHint: Int32,
+    completion: @escaping (Result<CameraPreparedIntermediate, Error>) -> Void
+  ) {
+    cameraPrepassPipeline.prepareIntermediate(
+      inputURL: inputURL,
+      canvasSize: canvasSize,
+      params: cameraParams,
+      fpsHint: fpsHint,
+      isCancelled: { false },
+      onProgress: nil,
+      completion: completion
+    )
+  }
+
+  func _testValidateStyledCameraIntermediate(
+    rawCameraURL: URL,
+    styledCameraURL: URL,
+    placementSourceRect: CGRect? = nil
+  ) -> NSError? {
+    validateStyledCameraIntermediate(
+      rawCameraAsset: AVAsset(url: rawCameraURL),
+      styledCameraAsset: AVAsset(url: styledCameraURL),
+      placementSourceRect: placementSourceRect
+    )
+  }
+
+  func _testValidateFinalStyledCameraExport(
+    styledCameraURL: URL,
+    finalExportURL: URL,
+    canvasSize: CGSize,
+    cameraParams: CameraCompositionParams,
+    placementSourceRect: CGRect? = nil
+  ) -> NSError? {
+    validateFinalStyledCameraExport(
+      styledCameraAsset: AVAsset(url: styledCameraURL),
+      finalExportAsset: AVAsset(url: finalExportURL),
+      canvasSize: canvasSize,
+      cameraParams: cameraParams,
+      placementSourceRect: placementSourceRect
+    )
+  }
+#endif
 
 }

@@ -57,7 +57,7 @@ class OverlayInteractiveView: NSView {
     )
 
     // Log the drag movement (throttling might be needed in high-frequency logs, but useful for debugging)
-    NativeLogger.d("OverlayView", "mouseDragged to \(newOrigin)")
+    // NativeLogger.d("OverlayView", "mouseDragged to \(newOrigin)")
 
     window.setFrameOrigin(newOrigin)
     let normalized = calculateNormalizedCenter(for: newOrigin)
@@ -129,10 +129,9 @@ private func cameraOverlayOrigin(
   )
 }
 
-final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class CameraOverlay: NSObject {
   private var deviceId: String?
-  private var session: AVCaptureSession?
-  private var input: AVCaptureDeviceInput?
+  private let captureCoordinator: CameraCaptureCoordinator
   private var window: NSWindow?
 
   private var isCustomPosition: Bool = false
@@ -148,7 +147,6 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
   private var preview: AVCaptureVideoPreviewLayer?
 
   // Pipeline B: Processing (Chroma Key)
-  private var videoOutput: AVCaptureVideoDataOutput?
   private lazy var ciContext: CIContext = { CIContext() }()
   private lazy var chromaKeyKernel: CIColorKernel? = {
     // Simple RGB distance kernel that accepts a target keyColor
@@ -198,6 +196,19 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
   var overlayWindowID: CGWindowID? {
     guard let win = window else { return nil }
     return CGWindowID(win.windowNumber)
+  }
+
+  var currentCustomNormalizedCenter: CGPoint? {
+    customNormalizedCenter
+  }
+
+  init(captureCoordinator: CameraCaptureCoordinator) {
+    self.captureCoordinator = captureCoordinator
+    super.init()
+  }
+
+  convenience override init() {
+    self.init(captureCoordinator: CameraCaptureCoordinator())
   }
 
   func setDevice(id: String?) {
@@ -419,18 +430,11 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
   func updateMirror(isMirrored: Bool) {
     self.isMirrored = isMirrored
+    captureCoordinator.setMirrored(isMirrored)
 
     // Update Standard Preview
     if let preview = preview {
       applyMirror(to: preview)
-    }
-
-    // Video Output (for Chroma Key)
-    if let connection = videoOutput?.connection(with: .video) {
-      if connection.isVideoMirroringSupported {
-        connection.automaticallyAdjustsVideoMirroring = false
-        connection.isVideoMirrored = isMirrored
-      }
     }
   }
 
@@ -466,6 +470,7 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
   }
 
   func resize(size: Double) {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.i("CameraOverlay", "resize to: \(size). isCustomPos: \(isCustomPosition)")
     guard let win = window else { return }
 
@@ -550,6 +555,7 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     file: String = #file,
     line: Int = #line
   ) {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.d("CameraOverlay", "Show file= \(file):\(line)")
     let desired = size ?? preferredSize
     NativeLogger.i(
@@ -605,7 +611,7 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     let pipelineChanged =
       (activeChromaKeyEnabled != chromaKeyEnabled) || (activeDeviceId != (deviceId ?? "default"))
 
-    if isShowing, let win = window, session != nil, !pipelineChanged,
+    if isShowing, window != nil, !pipelineChanged,
       oldPreferredSize == preferredSize
     {
       NativeLogger.i("CameraOverlay", "show() - resize applied (no rebuild)")
@@ -621,28 +627,19 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
       )
     }
 
-    if let w = window {
+    if window != nil {
       NativeLogger.d("CameraOverlay", "Window already exists, hiding first.")
       hide()
     }
 
-    guard
-      let cam =
-        (deviceId.flatMap { AVCaptureDevice(uniqueID: $0) } ?? AVCaptureDevice.default(for: .video))
-    else {
-      NativeLogger.e("CameraOverlay", "No camera device available")
-      completion(
-        FlutterError(code: NativeErrorCode.noCamera, message: "", details: nil))
-      return
-    }
-
-    let session = AVCaptureSession()
-    session.sessionPreset = .high
-
     do {
-      let input = try AVCaptureDeviceInput(device: cam)
-      if session.canAddInput(input) { session.addInput(input) }
-      self.input = input
+      try captureCoordinator.acquirePreview(deviceID: deviceId)
+      captureCoordinator.setMirrored(isMirrored)
+    } catch let flutterError as FlutterError {
+      completion(
+        flutterError
+      )
+      return
     } catch {
       NativeLogger.e("CameraOverlay", "Input Error: \(error.localizedDescription)")
       completion(
@@ -655,25 +652,13 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     // --- Pipeline Selection ---
     if chromaKeyEnabled {
       NativeLogger.d("CameraOverlay", "Setting up ChromaKey Pipeline")
-      let output = AVCaptureVideoDataOutput()
-      // BGRA is required for Core Image usually
-      output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-      output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera.processing.queue"))
-
-      if session.canAddOutput(output) {
-        session.addOutput(output)
-        // Apply mirror to connection if needed
-        if let connection = output.connection(with: .video) {
-          if connection.isVideoMirroringSupported {
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = isMirrored
-          }
-        }
+      captureCoordinator.setSampleBufferHandler { [weak self] sampleBuffer in
+        self?.processSampleBuffer(sampleBuffer)
       }
-      self.videoOutput = output
     } else {
       NativeLogger.d("CameraOverlay", "Setting up Standard Preview Pipeline")
-      let layer = AVCaptureVideoPreviewLayer(session: session)
+      captureCoordinator.setSampleBufferHandler(nil)
+      let layer = captureCoordinator.makePreviewLayer()
       layer.videoGravity = .resizeAspectFill
       applyMirror(to: layer)
       self.preview = layer
@@ -759,9 +744,9 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         self?.customNormalizedCenter = CGPoint(x: nx, y: ny)
         self?.onMovedNormalized?(Double(nx), Double(ny))
       }
-      NativeLogger.d(
-        "CameraOverlay",
-        "User moved overlay to: \(newOrigin) (Normalized: \(String(describing: normalized)))")
+      // NativeLogger.d(
+      //   "CameraOverlay",
+      //   "User moved overlay to: \(newOrigin) (Normalized: \(String(describing: normalized)))")
     }
 
     let rootLayer = CALayer()
@@ -806,7 +791,6 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     self.window = panel
     self.containerLayer = container
     self.shadowLayer = shadowL
-    self.session = session
 
     let mask = CAShapeLayer()
     container.mask = mask
@@ -825,7 +809,6 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
     NativeLogger.i("CameraOverlay", "Window constructed & Ordered Front. Starting session...")
     panel.orderFrontRegardless()
-    session.startRunning()
 
     // Update active state tracking
     self.activeChromaKeyEnabled = chromaKeyEnabled
@@ -834,11 +817,7 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     completion(nil)
   }
 
-  // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
-  func captureOutput(
-    _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
-    from connection: AVCaptureConnection
-  ) {
+  private func processSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
     guard chromaKeyEnabled, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
       return
     }
@@ -873,13 +852,13 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
   }
 
   func hide() {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.i("CameraOverlay", "Hide called")
-    session?.stopRunning()
-    session = nil
+    captureCoordinator.setSampleBufferHandler(nil)
+    captureCoordinator.removePreviewLayer(preview)
+    captureCoordinator.releasePreview()
     preview?.removeFromSuperlayer()
     preview = nil
-
-    videoOutput = nil
 
     containerLayer?.contents = nil
     containerLayer?.removeFromSuperlayer()
@@ -900,6 +879,7 @@ final class CameraOverlay: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
   }
 
   func setFrame(x: Double, y: Double, width: Double, height: Double) {
+    dispatchPrecondition(condition: .onQueue(.main))
     NativeLogger.i("CameraOverlay", "setFrame explicit: x=\(x), y=\(y), w=\(width)")
     guard let win = window else { return }
     var f = win.frame

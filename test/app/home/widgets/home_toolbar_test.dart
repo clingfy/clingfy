@@ -36,7 +36,7 @@ class _ToolbarPostProcessingController extends PostProcessingController {
     );
     controller.attachToRecording(
       sessionId: 'rec_test_session',
-      sourcePath: '/tmp/original.mov',
+      projectPath: '/tmp/original.clingfyproj',
     );
     return controller;
   }
@@ -113,7 +113,6 @@ void main() {
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: HomeToolbar(
-              title: 'Clingfy',
               isRecording: false,
               isPaused: false,
               uiState: uiState,
@@ -181,7 +180,6 @@ void main() {
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: HomeToolbar(
-              title: 'Clingfy',
               isRecording: false,
               isPaused: false,
               uiState: uiState,
@@ -224,7 +222,6 @@ void main() {
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: DesktopToolbar(
-            title: 'Clingfy',
             isRecording: false,
             isPaused: false,
             exportStatus: const ToolbarExportStatusPresentation(
