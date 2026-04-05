@@ -30,6 +30,9 @@ void main() {
   });
 
   tearDown(() async {
+    final nativeBridge = NativeBridge.instance;
+    nativeBridge.setOnProjectOpenRequested((_) {});
+    nativeBridge.setOnProjectOpenRequested(null);
     await clearCommonNativeMocks();
   });
 
@@ -297,6 +300,23 @@ void main() {
   );
 
   test(
+    'opening an existing project enters preview flow with a synthetic session',
+    () async {
+      final harness = await createHarness();
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.settings.dispose);
+
+      harness.recording.openExistingProject('/tmp/finder.clingfyproj');
+
+      expect(harness.recording.phase, WorkflowPhase.openingPreview);
+      expect(harness.recording.projectPath, '/tmp/finder.clingfyproj');
+      expect(harness.recording.previewPath, '/tmp/finder.clingfyproj');
+      expect(harness.recording.sessionId, isNotNull);
+      expect(harness.recording.shouldNotifyRecordingFinalizedOnPreviewOpen, isFalse);
+    },
+  );
+
+  test(
     'recordingFinalized is not clobbered when stopRecording returns later',
     () async {
       final harness = await createHarness();
@@ -370,6 +390,57 @@ void main() {
       expect(harness.recording.showPreviewSurface, isFalse);
     },
   );
+
+  test(
+    'replacing an open preview waits for previewClosed before opening the next project',
+    () async {
+      final harness = await createHarness();
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.settings.dispose);
+
+      harness.recording.openExistingProject('/tmp/current.clingfyproj');
+      final currentSessionId = harness.recording.sessionId!;
+
+      await _emitWorkflowEvent({
+        'type': 'previewReady',
+        'sessionId': currentSessionId,
+        'path': '/tmp/current.clingfyproj',
+        'token': 'current_preview',
+      });
+
+      expect(harness.recording.phase, WorkflowPhase.previewReady);
+
+      await harness.recording.replacePreviewWithProject('/tmp/next.clingfyproj');
+      expect(harness.recording.phase, WorkflowPhase.closingPreview);
+
+      await _emitWorkflowEvent({
+        'type': 'previewClosed',
+        'sessionId': currentSessionId,
+        'reason': 'flutterRequest',
+      });
+
+      expect(harness.recording.phase, WorkflowPhase.openingPreview);
+      expect(harness.recording.projectPath, '/tmp/next.clingfyproj');
+      expect(harness.recording.previewPath, '/tmp/next.clingfyproj');
+      expect(harness.recording.sessionId, isNot(currentSessionId));
+    },
+  );
+
+  test('openProjectRequest workflow events are ignored by RecordingController', () async {
+    final harness = await createHarness();
+    addTearDown(harness.recording.dispose);
+    addTearDown(harness.settings.dispose);
+
+    expect(harness.recording.phase, WorkflowPhase.idle);
+
+    await _emitWorkflowEvent({
+      'type': 'openProjectRequest',
+      'projectPath': '/tmp/finder.clingfyproj',
+    });
+
+    expect(harness.recording.phase, WorkflowPhase.idle);
+    expect(harness.recording.projectPath, isNull);
+  });
 
   test('previewReady transitions previewLoading to previewReady', () async {
     final harness = await createHarness();

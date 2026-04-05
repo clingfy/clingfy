@@ -3154,6 +3154,18 @@ abstract class AppLocalizations {
   /// **'Recording saved:'**
   String get recordingSaved;
 
+  /// No description provided for @externalProjectOpenBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish the current recording or preview transition before opening another project.'**
+  String get externalProjectOpenBlocked;
+
+  /// No description provided for @externalProjectOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open that Clingfy project.'**
+  String get externalProjectOpenFailed;
+
   /// No description provided for @exportSuccess.
   ///
   /// In en, this message translates to:

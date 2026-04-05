@@ -1671,6 +1671,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recordingSaved => 'Recording saved:';
 
   @override
+  String get externalProjectOpenBlocked =>
+      'Finish the current recording or preview transition before opening another project.';
+
+  @override
+  String get externalProjectOpenFailed =>
+      'Couldn\'t open that Clingfy project.';
+
+  @override
   String get exportSuccess => 'Export successful:';
 
   @override

@@ -1686,6 +1686,14 @@ class AppLocalizationsRo extends AppLocalizations {
   String get recordingSaved => 'Înregistrare salvată:';
 
   @override
+  String get externalProjectOpenBlocked =>
+      'Finalizează înregistrarea curentă sau tranziția previzualizării înainte de a deschide alt proiect.';
+
+  @override
+  String get externalProjectOpenFailed =>
+      'Acest proiect Clingfy nu a putut fi deschis.';
+
+  @override
   String get exportSuccess => 'Export reușit:';
 
   @override

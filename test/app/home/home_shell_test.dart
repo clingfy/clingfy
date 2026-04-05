@@ -1369,6 +1369,230 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'Finder-open requests are blocked with a notice while countdown is active',
+    (tester) async {
+      _setDesktopWindow(tester);
+      final harness = await createHarness();
+
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.player.dispose);
+      addTearDown(harness.device.dispose);
+      addTearDown(harness.overlay.dispose);
+      addTearDown(harness.permissions.dispose);
+      addTearDown(harness.post.dispose);
+      addTearDown(harness.license.dispose);
+      addTearDown(harness.countdown.dispose);
+      addTearDown(harness.uiState.dispose);
+      addTearDown(harness.settings.dispose);
+
+      await tester.pumpWidget(
+        buildShell(
+          actions: harness.actions,
+          countdown: harness.countdown,
+          device: harness.device,
+          license: harness.license,
+          overlay: harness.overlay,
+          player: harness.player,
+          post: harness.post,
+          recording: harness.recording,
+          settings: harness.settings,
+          uiState: harness.uiState,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final context = tester.element(find.byType(HomeShell));
+      final l10n = AppLocalizations.of(context)!;
+
+      harness.recording.beginRecordingStartIntent();
+      harness.countdown.start(durationSeconds: 5, onFinished: () {});
+
+      await harness.actions.handleExternalProjectOpen(
+        context,
+        '/tmp/finder.clingfyproj',
+      );
+      await tester.pump();
+
+      expect(harness.recording.phase, WorkflowPhase.startingRecording);
+      expect(
+        harness.uiState.notice?.message,
+        l10n.externalProjectOpenBlocked,
+      );
+
+      harness.countdown.cancel();
+      harness.uiState.clearTransientNotice();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'Finder-open no-ops when the same project is already open',
+    (tester) async {
+      _setDesktopWindow(tester);
+      final harness = await createHarness();
+
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.player.dispose);
+      addTearDown(harness.device.dispose);
+      addTearDown(harness.overlay.dispose);
+      addTearDown(harness.permissions.dispose);
+      addTearDown(harness.post.dispose);
+      addTearDown(harness.license.dispose);
+      addTearDown(harness.countdown.dispose);
+      addTearDown(harness.uiState.dispose);
+      addTearDown(harness.settings.dispose);
+
+      await tester.pumpWidget(
+        buildShell(
+          actions: harness.actions,
+          countdown: harness.countdown,
+          device: harness.device,
+          license: harness.license,
+          overlay: harness.overlay,
+          player: harness.player,
+          post: harness.post,
+          recording: harness.recording,
+          settings: harness.settings,
+          uiState: harness.uiState,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final currentSessionId = await _openPreviewShell(harness.recording);
+      await tester.pumpAndSettle();
+      final context = tester.element(find.byType(HomeShell));
+
+      await harness.actions.handleExternalProjectOpen(
+        context,
+        '/tmp/test.clingfyproj',
+      );
+      await tester.pumpAndSettle();
+
+      expect(harness.recording.phase, WorkflowPhase.previewReady);
+      expect(harness.recording.projectPath, '/tmp/test.clingfyproj');
+      expect(harness.recording.sessionId, currentSessionId);
+      expect(find.text(AppLocalizations.of(context)!.closeUnexportedRecordingTitle), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'external project open failures surface a localized notice',
+    (tester) async {
+      _setDesktopWindow(tester);
+      final harness = await createHarness();
+
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.player.dispose);
+      addTearDown(harness.device.dispose);
+      addTearDown(harness.overlay.dispose);
+      addTearDown(harness.permissions.dispose);
+      addTearDown(harness.post.dispose);
+      addTearDown(harness.license.dispose);
+      addTearDown(harness.countdown.dispose);
+      addTearDown(harness.uiState.dispose);
+      addTearDown(harness.settings.dispose);
+
+      await tester.pumpWidget(
+        buildShell(
+          actions: harness.actions,
+          countdown: harness.countdown,
+          device: harness.device,
+          license: harness.license,
+          overlay: harness.overlay,
+          player: harness.player,
+          post: harness.post,
+          recording: harness.recording,
+          settings: harness.settings,
+          uiState: harness.uiState,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final context = tester.element(find.byType(HomeShell));
+      final l10n = AppLocalizations.of(context)!;
+
+      harness.actions.handleExternalProjectOpenFailed(
+        context,
+        '/tmp/bad.clingfyproj',
+      );
+      await tester.pump();
+
+      expect(harness.uiState.notice?.message, l10n.externalProjectOpenFailed);
+    },
+  );
+
+  testWidgets(
+    'Finder-open of a different project confirms before replacing the preview',
+    (tester) async {
+      _setDesktopWindow(tester);
+      final harness = await createHarness();
+
+      addTearDown(harness.recording.dispose);
+      addTearDown(harness.player.dispose);
+      addTearDown(harness.device.dispose);
+      addTearDown(harness.overlay.dispose);
+      addTearDown(harness.permissions.dispose);
+      addTearDown(harness.post.dispose);
+      addTearDown(harness.license.dispose);
+      addTearDown(harness.countdown.dispose);
+      addTearDown(harness.uiState.dispose);
+      addTearDown(harness.settings.dispose);
+
+      await tester.pumpWidget(
+        buildShell(
+          actions: harness.actions,
+          countdown: harness.countdown,
+          device: harness.device,
+          license: harness.license,
+          overlay: harness.overlay,
+          player: harness.player,
+          post: harness.post,
+          recording: harness.recording,
+          settings: harness.settings,
+          uiState: harness.uiState,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final currentSessionId = await _openPreviewShell(harness.recording);
+      await tester.pumpAndSettle();
+      final context = tester.element(find.byType(HomeShell));
+      final l10n = AppLocalizations.of(context)!;
+
+      unawaited(
+        harness.actions.handleExternalProjectOpen(
+          context,
+          '/tmp/other.clingfyproj',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(l10n.closeUnexportedRecordingTitle), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, l10n.close));
+      await tester.pump();
+
+      expect(harness.recording.phase, WorkflowPhase.closingPreview);
+
+      await _emitWorkflowEvent({
+        'type': 'previewClosed',
+        'sessionId': currentSessionId,
+        'reason': 'flutterRequest',
+      });
+      await tester.pump();
+
+      expect(harness.recording.projectPath, '/tmp/other.clingfyproj');
+      expect(
+        {
+          WorkflowPhase.openingPreview,
+          WorkflowPhase.previewLoading,
+        }.contains(harness.recording.phase),
+        isTrue,
+      );
+    },
+  );
 }
 
 void _setDesktopWindow(

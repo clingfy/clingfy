@@ -1,3 +1,4 @@
+import Cocoa
 import Foundation
 import XCTest
 
@@ -127,6 +128,115 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     XCTAssertEqual(decoded.status, .ready)
     XCTAssertEqual(contents.filter { $0.lastPathComponent == "project.json" }.count, 1)
     XCTAssertFalse(contents.contains { $0.lastPathComponent.contains(".tmp") })
+  }
+
+  func testProjectOpenValidatorAcceptsValidReadyProject() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    let projectRoot = rootURL.appendingPathComponent(
+      RecordingProjectPaths.projectDirectoryName(for: "rec_openable"),
+      isDirectory: true
+    )
+    try createProjectSkeleton(at: projectRoot, projectId: "rec_openable")
+    try writeReadyMetadataFiles(to: projectRoot)
+    try markProjectReady(at: projectRoot)
+
+    let projectRef = try ProjectOpenValidator.validateProjectURL(projectRoot)
+
+    XCTAssertEqual(projectRef.projectId, "rec_openable")
+    XCTAssertEqual(projectRef.rootURL.standardizedFileURL, projectRoot.standardizedFileURL)
+  }
+
+  func testProjectOpenValidatorRejectsReadyProjectMissingRequiredFiles() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    let projectRoot = rootURL.appendingPathComponent(
+      RecordingProjectPaths.projectDirectoryName(for: "rec_missing"),
+      isDirectory: true
+    )
+    try createProjectSkeleton(at: projectRoot, projectId: "rec_missing")
+    try markProjectReady(at: projectRoot)
+
+    XCTAssertThrowsError(try ProjectOpenValidator.validateProjectURL(projectRoot)) { error in
+      guard case RecordingProjectManifestError.missingRequiredProjectFiles(let paths) = error else {
+        return XCTFail("Unexpected error: \(error)")
+      }
+      XCTAssertTrue(paths.contains { $0.hasSuffix("/capture/screen.mov") })
+      XCTAssertTrue(paths.contains { $0.hasSuffix("/capture/screen.meta.json") })
+    }
+  }
+
+  func testProjectOpenCoordinatorQueuesBeforeSinkAttachAndFlushesInOrder() {
+    let coordinator = ProjectOpenCoordinator()
+    var receivedEvents = [[String: Any]]()
+
+    coordinator.enqueueProjectPath("/tmp/first.clingfyproj")
+    coordinator.enqueueProjectPath("/tmp/first.clingfyproj")
+    coordinator.enqueueProjectPath("/tmp/second.clingfyproj")
+
+    coordinator.attachWorkflowEventSink { payload in
+      receivedEvents.append(payload as? [String: Any] ?? [:])
+    }
+
+    XCTAssertEqual(
+      receivedEvents.map { $0["projectPath"] as? String },
+      ["/tmp/first.clingfyproj", "/tmp/second.clingfyproj"]
+    )
+  }
+
+  func testAppDelegateOpenEnqueuesValidatedProjectPaths() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer {
+      ProjectOpenCoordinator.shared.detachWorkflowEventSink()
+      ProjectOpenCoordinator.shared._testReset()
+      try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    let projectRoot = rootURL.appendingPathComponent(
+      RecordingProjectPaths.projectDirectoryName(for: "rec_delegate"),
+      isDirectory: true
+    )
+    try createProjectSkeleton(at: projectRoot, projectId: "rec_delegate")
+    try writeReadyMetadataFiles(to: projectRoot)
+    try markProjectReady(at: projectRoot)
+
+    ProjectOpenCoordinator.shared._testReset()
+    var receivedEvents = [[String: Any]]()
+    ProjectOpenCoordinator.shared.attachWorkflowEventSink { payload in
+      receivedEvents.append(payload as? [String: Any] ?? [:])
+    }
+
+    let appDelegate = AppDelegate()
+    appDelegate.application(NSApplication.shared, open: [projectRoot])
+
+    XCTAssertEqual(receivedEvents.count, 1)
+    XCTAssertEqual(receivedEvents.first?["type"] as? String, "openProjectRequest")
+    XCTAssertEqual(receivedEvents.first?["projectPath"] as? String, projectRoot.path)
+  }
+
+  func testAppDelegateOpenIgnoresInvalidProjectDirectories() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer {
+      ProjectOpenCoordinator.shared.detachWorkflowEventSink()
+      ProjectOpenCoordinator.shared._testReset()
+      try? FileManager.default.removeItem(at: rootURL)
+    }
+
+    let invalidRoot = rootURL.appendingPathComponent("not-a-project", isDirectory: true)
+    try FileManager.default.createDirectory(at: invalidRoot, withIntermediateDirectories: true)
+
+    ProjectOpenCoordinator.shared._testReset()
+    var receivedEvents = [[String: Any]]()
+    ProjectOpenCoordinator.shared.attachWorkflowEventSink { payload in
+      receivedEvents.append(payload as? [String: Any] ?? [:])
+    }
+
+    let appDelegate = AppDelegate()
+    appDelegate.application(NSApplication.shared, open: [invalidRoot])
+
+    XCTAssertTrue(receivedEvents.isEmpty)
   }
 
   func testLegacyWorkspaceResetWipesFlatArtifactsAndCreatesSentinel() throws {

@@ -21,12 +21,14 @@ class NativeBridge {
   VoidCallback? _onIndicatorResumeTapped;
   ValueChanged<double>? _onExportProgress;
   VoidCallback? _onMenuBarToggleRequest;
+  void Function(String projectPath)? _onProjectOpenRequested;
   Function(String type, Map<String, dynamic>? payload)?
   _onPreRecordingBarAction;
   Function(String type, dynamic id)? _onNativeSelectionChanged;
   void Function(double normalizedX, double normalizedY)? _onCameraOverlayMoved;
   VoidCallback? _onAreaSelectionCleared;
   void Function(String version, String build)? _onUpdateAvailable;
+  final List<String> _pendingProjectOpenRequests = [];
 
   static final NativeBridge _instance = NativeBridge._internal();
 
@@ -63,6 +65,41 @@ class NativeBridge {
         Log.e("NativeBridge", "Error on updater event stream: $error");
       },
     );
+
+    _workflowEventStream.listen(
+      (event) {
+        final type = event['type'] as String?;
+        if (type != 'openProjectRequest') {
+          return;
+        }
+
+        final projectPath = event['projectPath'] as String?;
+        if (projectPath == null || projectPath.isEmpty) {
+          return;
+        }
+
+        Log.i(
+          "NativeBridge",
+          "Received Finder project open request",
+          null,
+          null,
+          {'projectPath': projectPath},
+        );
+
+        final cb = _onProjectOpenRequested;
+        if (cb != null) {
+          cb(projectPath);
+          return;
+        }
+
+        if (!_pendingProjectOpenRequests.contains(projectPath)) {
+          _pendingProjectOpenRequests.add(projectPath);
+        }
+      },
+      onError: (error) {
+        Log.e("NativeBridge", "Error on workflow event stream: $error");
+      },
+    );
   }
 
   Stream<Map<String, dynamic>> get workflowEvents => _workflowEventStream;
@@ -82,6 +119,19 @@ class NativeBridge {
 
   void setOnMenuBarToggleRequest(VoidCallback? cb) {
     _onMenuBarToggleRequest = cb;
+  }
+
+  void setOnProjectOpenRequested(void Function(String projectPath)? cb) {
+    _onProjectOpenRequested = cb;
+    if (cb == null) {
+      return;
+    }
+
+    final pending = List<String>.from(_pendingProjectOpenRequests);
+    _pendingProjectOpenRequests.clear();
+    for (final projectPath in pending) {
+      cb(projectPath);
+    }
   }
 
   void setOnPreRecordingBarAction(

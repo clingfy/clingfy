@@ -164,6 +164,72 @@ class HomeActions {
     }
   }
 
+  Future<void> handleExternalProjectOpen(
+    BuildContext context,
+    String projectPath,
+  ) async {
+    if (projectPath.isEmpty) return;
+
+    final l10n = AppLocalizations.of(context)!;
+
+    if (_shouldBlockExternalProjectOpen()) {
+      uiState.setNotice(
+        HomeUiNotice(
+          message: l10n.externalProjectOpenBlocked,
+          tone: HomeUiNoticeTone.warning,
+          autoDismissAfter: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+
+    if (recordingController.projectPath == projectPath &&
+        recordingController.canInteractWithPreview) {
+      return;
+    }
+
+    if (recordingController.canInteractWithPreview &&
+        recordingController.projectPath != null &&
+        recordingController.projectPath != projectPath) {
+      final shouldClose = await confirmCloseUnexportedRecordingIfNeeded(
+        context,
+        warningEnabled:
+            settingsController.workspace.warnBeforeClosingUnexportedRecording,
+        hasExportedCurrentRecording:
+            postProcessingController.hasExportedCurrentRecording,
+        disableFutureWarnings: () => settingsController.workspace
+            .updateWarnBeforeClosingUnexportedRecording(false),
+      );
+      if (!shouldClose) {
+        return;
+      }
+
+      playerController.clearError();
+      uiState.clearTransientNotice();
+      await recordingController.replacePreviewWithProject(projectPath);
+      return;
+    }
+
+    playerController.clearError();
+    uiState.clearTransientNotice();
+    recordingController.clearError();
+    recordingController.openExistingProject(projectPath);
+  }
+
+  void handleExternalProjectOpenFailed(
+    BuildContext context,
+    String projectPath,
+  ) {
+    if (projectPath.isEmpty) return;
+
+    uiState.setNotice(
+      HomeUiNotice(
+        message: AppLocalizations.of(context)!.externalProjectOpenFailed,
+        tone: HomeUiNoticeTone.error,
+      ),
+    );
+  }
+
   Future<void> exportFromUi(BuildContext context) async {
     final l10n = AppLocalizations.of(context)!;
 
@@ -284,6 +350,25 @@ class HomeActions {
     } finally {
       recordingController.finishExporting();
     }
+  }
+
+  bool _shouldBlockExternalProjectOpen() {
+    if (countdownController.isActive) {
+      return true;
+    }
+
+    return switch (recordingController.phase) {
+      WorkflowPhase.idle || WorkflowPhase.previewReady => false,
+      WorkflowPhase.openingPreview ||
+      WorkflowPhase.previewLoading ||
+      WorkflowPhase.closingPreview ||
+      WorkflowPhase.startingRecording ||
+      WorkflowPhase.recording ||
+      WorkflowPhase.pausedRecording ||
+      WorkflowPhase.stoppingRecording ||
+      WorkflowPhase.finalizingRecording ||
+      WorkflowPhase.exporting => true,
+    };
   }
 
   Future<void> closePreview(BuildContext context) async {

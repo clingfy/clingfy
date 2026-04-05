@@ -565,6 +565,8 @@
   "errAssetInvalid": "Failed to prepare video preview.",
   "applyEffects": "Apply Effects",
   "recordingSaved": "Recording saved:",
+  "externalProjectOpenBlocked": "Finish the current recording or preview transition before opening another project.",
+  "externalProjectOpenFailed": "Couldn't open that Clingfy project.",
   "exportSuccess": "Export successful:",
   "open": "Open",
   "cursorDataMissing": "Cursor data missing",

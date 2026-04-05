@@ -43,9 +43,10 @@ final class RecordingStore {
           manifest: manifestEntry.manifest,
           projectRootURL: projectRootURL
         ) {
-          let missingFiles = missingRequiredReadyProjectFiles(
+          let missingFiles = ProjectOpenValidator.missingRequiredReadyProjectFiles(
             for: manifestEntry.manifest,
-            projectRootURL: projectRootURL
+            projectRootURL: projectRootURL,
+            fileManager: fm
           )
           if shouldLogInvalidProjects {
             NativeLogger.w(
@@ -336,10 +337,7 @@ final class RecordingStore {
     manifest: RecordingProjectManifest,
     projectRootURL: URL
   ) -> Bool {
-    let missingFiles = missingRequiredReadyProjectFiles(
-      for: manifest,
-      projectRootURL: projectRootURL
-    )
+    let missingFiles = missingRequiredReadyProjectFiles(for: manifest, projectRootURL: projectRootURL)
     guard !missingFiles.isEmpty else { return false }
     return manifest.status == .ready || manifest.status == .failed
   }
@@ -348,26 +346,10 @@ final class RecordingStore {
     for manifest: RecordingProjectManifest,
     projectRootURL: URL
   ) -> [URL] {
-    let screenVideoURL =
-      RecordingProjectPaths.resolvedURL(
-        for: manifest.capture.screenVideo,
-        projectRoot: projectRootURL
-      ) ?? RecordingProjectPaths.screenVideoURL(for: projectRootURL)
-    let metadataURL =
-      RecordingProjectPaths.resolvedURL(
-        for: manifest.capture.screenMetadata,
-        projectRoot: projectRootURL
-      ) ?? RecordingProjectPaths.screenMetadataURL(for: projectRootURL)
-
-    var requiredFiles = [screenVideoURL, metadataURL]
-
-    if let camera = manifest.camera {
-      let cameraRawURL =
-        RecordingProjectPaths.resolvedURL(for: camera.rawVideo, projectRoot: projectRootURL)
-        ?? RecordingProjectPaths.cameraRawURL(for: projectRootURL)
-      requiredFiles.append(cameraRawURL)
-    }
-
-    return requiredFiles.filter { !fm.fileExists(atPath: $0.path) }
+    ProjectOpenValidator.missingRequiredReadyProjectFiles(
+      for: manifest,
+      projectRootURL: projectRootURL,
+      fileManager: fm
+    )
   }
 }

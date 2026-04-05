@@ -15,7 +15,9 @@ class HomeBindings {
   HomeBindings({
     required this.scope,
     required this.onToggleRecording,
+    required this.onOpenExternalProject,
     required this.onRecordingFinalized,
+    required this.onExternalProjectOpenFailed,
     required this.onExportProgress,
     required this.onHandleNativeBarAction,
     required this.onHandleNativeSelectionChanged,
@@ -24,7 +26,9 @@ class HomeBindings {
 
   final HomeScope scope;
   final Future<void> Function() onToggleRecording;
+  final Future<void> Function(String projectPath) onOpenExternalProject;
   final Future<void> Function(String path) onRecordingFinalized;
+  final void Function(String projectPath) onExternalProjectOpenFailed;
   final void Function(double progress) onExportProgress;
   final void Function(String type, Map<String, dynamic>? payload)
   onHandleNativeBarAction;
@@ -62,6 +66,12 @@ class HomeBindings {
     }
 
     final state = recordingController.state;
+    final failedExternalProjectPath = recordingController
+        .consumeFailedExternalProjectOpenPath();
+    if (failedExternalProjectPath != null) {
+      onExternalProjectOpenFailed(failedExternalProjectPath);
+    }
+
     if (state.phase == WorkflowPhase.openingPreview &&
         state.sessionId != null &&
         state.projectPath != null &&
@@ -76,7 +86,9 @@ class HomeBindings {
           sessionId: state.sessionId!,
         ),
       );
-      unawaited(onRecordingFinalized(state.projectPath!));
+      if (recordingController.shouldNotifyRecordingFinalizedOnPreviewOpen) {
+        unawaited(onRecordingFinalized(state.projectPath!));
+      }
     } else if (state.phase == WorkflowPhase.idle &&
         _attachedRecordingSessionId != null) {
       _attachedRecordingSessionId = null;
@@ -103,6 +115,9 @@ class HomeBindings {
     });
     nativeBridge.setOnMenuBarToggleRequest(() {
       onToggleRecording();
+    });
+    nativeBridge.setOnProjectOpenRequested((projectPath) {
+      unawaited(onOpenExternalProject(projectPath));
     });
     nativeBridge.setOnExportProgress(onExportProgress);
     nativeBridge.setOnPreRecordingBarAction(onHandleNativeBarAction);
@@ -135,6 +150,7 @@ class HomeBindings {
     nativeBridge.setOnIndicatorStopTapped(null);
     nativeBridge.setOnIndicatorResumeTapped(null);
     nativeBridge.setOnMenuBarToggleRequest(null);
+    nativeBridge.setOnProjectOpenRequested(null);
     nativeBridge.setOnExportProgress(null);
     nativeBridge.setOnPreRecordingBarAction(null);
     nativeBridge.setOnNativeSelectionChanged(null);

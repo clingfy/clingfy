@@ -1658,6 +1658,13 @@ class AppLocalizationsAr extends AppLocalizations {
   String get recordingSaved => 'تم حفظ التسجيل:';
 
   @override
+  String get externalProjectOpenBlocked =>
+      'أنهِ التسجيل الحالي أو انتقال المعاينة قبل فتح مشروع آخر.';
+
+  @override
+  String get externalProjectOpenFailed => 'تعذّر فتح مشروع Clingfy هذا.';
+
+  @override
   String get exportSuccess => 'تم التصدير بنجاح:';
 
   @override

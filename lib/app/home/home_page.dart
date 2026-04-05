@@ -87,8 +87,12 @@ class _HomePageState extends State<HomePage> {
     _bindings = HomeBindings(
       scope: homeScope,
       onToggleRecording: () => actions.toggleRecording(context),
+      onOpenExternalProject: (projectPath) =>
+          actions.handleExternalProjectOpen(context, projectPath),
       onRecordingFinalized: (path) =>
           actions.handleRecordingFinalized(context, path),
+      onExternalProjectOpenFailed: (projectPath) =>
+          actions.handleExternalProjectOpenFailed(context, projectPath),
       onExportProgress: actions.handleExportProgress,
       onHandleNativeBarAction: (type, payload) =>
           actions.handleNativeBarAction(context, type, payload),

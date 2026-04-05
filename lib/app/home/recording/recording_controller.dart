@@ -11,6 +11,8 @@ import 'package:clingfy/app/infrastructure/logging/logger_service.dart';
 import 'package:clingfy/core/models/app_models.dart';
 import 'package:clingfy/app/settings/settings_controller.dart';
 
+enum _PreviewOpenSource { recordingFinalized, externalProject }
+
 class RecordingController extends ChangeNotifier {
   RecordingController({
     required NativeBridge nativeBridge,
@@ -37,6 +39,10 @@ class RecordingController extends ChangeNotifier {
   String? _mountedPreviewSessionId;
   bool _previewOpenRequested = false;
   bool _pauseResumeInFlight = false;
+  _PreviewOpenSource? _previewOpenSource;
+  String? _pendingExternalProjectReplacementPath;
+  String? _openingExternalProjectPath;
+  String? _failedExternalProjectOpenPath;
   RecordingPauseResumeCapabilities _pauseResumeCapabilities =
       const RecordingPauseResumeCapabilities.unsupported();
   final RecordedDurationTracker _durationTracker = RecordedDurationTracker();
@@ -119,6 +125,8 @@ class RecordingController extends ChangeNotifier {
   bool get isBusy => isBusyTransitioning;
   bool get showTimelineBar => phase == WorkflowPhase.previewReady;
   bool get showPreRecordingBar => phase == WorkflowPhase.idle;
+  bool get shouldNotifyRecordingFinalizedOnPreviewOpen =>
+      _previewOpenSource == _PreviewOpenSource.recordingFinalized;
 
   Duration get elapsed => _elapsed;
   bool get autoStopEnabled => _settings.recording.autoStopEnabled;
@@ -202,6 +210,27 @@ class RecordingController extends ChangeNotifier {
   void cancelPendingStartIntent() {
     if (phase != WorkflowPhase.startingRecording || _startCommandIssued) return;
     _transitionToIdle(clearError: false);
+  }
+
+  void openExistingProject(String projectPath) {
+    if (projectPath.isEmpty) return;
+    _pendingExternalProjectReplacementPath = null;
+    _enterPreviewForProject(
+      projectPath: projectPath,
+      source: _PreviewOpenSource.externalProject,
+    );
+  }
+
+  Future<void> replacePreviewWithProject(String projectPath) async {
+    if (projectPath.isEmpty || !showPreviewShell) return;
+    _pendingExternalProjectReplacementPath = projectPath;
+    await _beginPreviewClose(requestNativeClose: true);
+  }
+
+  String? consumeFailedExternalProjectOpenPath() {
+    final failedPath = _failedExternalProjectOpenPath;
+    _failedExternalProjectOpenPath = null;
+    return failedPath;
   }
 
   Future<void> startRecording({
@@ -452,6 +481,7 @@ class RecordingController extends ChangeNotifier {
       );
     } catch (e, st) {
       Log.e("Recording", "Failed to open preview: $e", e, st);
+      _recordExternalProjectOpenFailureIfNeeded();
       _state = _state.copyWith(
         errorCode: 'PREVIEW_OPEN_ERROR',
         errorMessage: e.toString(),
@@ -548,6 +578,8 @@ class RecordingController extends ChangeNotifier {
         return;
       case 'previewClosed':
         _handlePreviewClosedEvent(event);
+        return;
+      case 'openProjectRequest':
         return;
       default:
         Log.d('Recording', 'Ignoring unknown workflow event: $type');
@@ -666,22 +698,10 @@ class RecordingController extends ChangeNotifier {
       'Recording',
       'Recording finalized for session $eventSessionId, opening preview shell for $projectPath',
     );
-    _pauseResumeInFlight = false;
-    _stopElapsedTicker();
-    _disarmAutoStopTimer();
-    Log.recordingId = null;
-    _startCommandIssued = false;
-    _mountedPreviewSessionId = null;
-    _previewOpenRequested = false;
-    _setState(
-      _state.copyWith(
-        phase: WorkflowPhase.openingPreview,
-        projectPath: projectPath,
-        previewPath: projectPath,
-        clearPreviewToken: true,
-        clearErrorCode: true,
-        clearErrorMessage: true,
-      ),
+    _enterPreviewForProject(
+      projectPath: projectPath,
+      source: _PreviewOpenSource.recordingFinalized,
+      sessionId: eventSessionId,
     );
     unawaited(ClingfyTelemetry.stopSession());
   }
@@ -739,6 +759,7 @@ class RecordingController extends ChangeNotifier {
       return;
     }
 
+    _openingExternalProjectPath = null;
     _setState(
       _state.copyWith(
         phase: WorkflowPhase.previewReady,
@@ -760,6 +781,7 @@ class RecordingController extends ChangeNotifier {
     final errorCode = event['reason']?.toString() ?? 'PREVIEW_ERROR';
     final errorMessage =
         event['error']?.toString() ?? event['reason']?.toString();
+    _recordExternalProjectOpenFailureIfNeeded();
     _state = _state.copyWith(errorCode: errorCode, errorMessage: errorMessage);
     notifyListeners();
     unawaited(_beginPreviewClose(requestNativeClose: true));
@@ -776,6 +798,16 @@ class RecordingController extends ChangeNotifier {
         null,
         null,
         {'phase': phase.name, 'sessionId': eventSessionId, 'reason': reason},
+      );
+      return;
+    }
+
+    final pendingReplacementPath = _pendingExternalProjectReplacementPath;
+    if (pendingReplacementPath != null && pendingReplacementPath.isNotEmpty) {
+      _pendingExternalProjectReplacementPath = null;
+      _enterPreviewForProject(
+        projectPath: pendingReplacementPath,
+        source: _PreviewOpenSource.externalProject,
       );
       return;
     }
@@ -832,6 +864,9 @@ class RecordingController extends ChangeNotifier {
     _startCommandIssued = false;
     _mountedPreviewSessionId = null;
     _previewOpenRequested = false;
+    _previewOpenSource = null;
+    _pendingExternalProjectReplacementPath = null;
+    _openingExternalProjectPath = null;
     Log.recordingId = null;
     _state = RecordingWorkflowState(
       phase: WorkflowPhase.idle,
@@ -847,6 +882,47 @@ class RecordingController extends ChangeNotifier {
     if (changed) {
       notifyListeners();
     }
+  }
+
+  void _enterPreviewForProject({
+    required String projectPath,
+    required _PreviewOpenSource source,
+    String? sessionId,
+  }) {
+    final nextSessionId = sessionId ?? _generateSessionId();
+    _pauseResumeInFlight = false;
+    _stopElapsedTicker();
+    _disarmAutoStopTimer();
+    Log.recordingId = null;
+    _startCommandIssued = false;
+    _mountedPreviewSessionId = null;
+    _previewOpenRequested = false;
+    _previewOpenSource = source;
+    _failedExternalProjectOpenPath = null;
+    _pendingExternalProjectReplacementPath = null;
+    _openingExternalProjectPath = source == _PreviewOpenSource.externalProject
+        ? projectPath
+        : null;
+    _setState(
+      _state.copyWith(
+        phase: WorkflowPhase.openingPreview,
+        sessionId: nextSessionId,
+        projectPath: projectPath,
+        previewPath: projectPath,
+        clearPreviewToken: true,
+        clearErrorCode: true,
+        clearErrorMessage: true,
+      ),
+    );
+  }
+
+  void _recordExternalProjectOpenFailureIfNeeded() {
+    final externalProjectPath = _openingExternalProjectPath;
+    if (externalProjectPath == null || externalProjectPath.isEmpty) {
+      return;
+    }
+    _failedExternalProjectOpenPath = externalProjectPath;
+    _openingExternalProjectPath = null;
   }
 
   String _generateSessionId() {

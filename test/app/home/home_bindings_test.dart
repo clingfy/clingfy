@@ -106,6 +106,9 @@ void main() {
       RecordingController recording,
     )?
     onToggleRecording,
+    Future<void> Function(String projectPath)? onOpenExternalProject,
+    Future<void> Function(String path)? onRecordingFinalized,
+    void Function(String projectPath)? onExternalProjectOpenFailed,
   }) async {
     final nativeBridge = NativeBridge.instance;
     final settings = SettingsController(nativeBridge: nativeBridge);
@@ -144,7 +147,15 @@ void main() {
       onToggleRecording: () async {
         await onToggleRecording?.call(countdown, recording);
       },
-      onRecordingFinalized: (_) async {},
+      onOpenExternalProject: (projectPath) async {
+        await onOpenExternalProject?.call(projectPath);
+      },
+      onRecordingFinalized: (path) async {
+        await onRecordingFinalized?.call(path);
+      },
+      onExternalProjectOpenFailed: (projectPath) {
+        onExternalProjectOpenFailed?.call(projectPath);
+      },
       onExportProgress: (_) {},
       onHandleNativeBarAction: (_, __) {},
       onHandleNativeSelectionChanged: (_, __) {},
@@ -243,4 +254,66 @@ void main() {
       expect(harness.recording.phase, WorkflowPhase.idle);
     },
   );
+
+  test('Finder open requests are forwarded through HomeBindings', () async {
+    final openedProjects = <String>[];
+    final harness = await createHarness(
+      onOpenExternalProject: (projectPath) async {
+        openedProjects.add(projectPath);
+      },
+    );
+    addTearDown(harness.dispose);
+
+    harness.bindings.bind();
+
+    await _emitWorkflowEvent({
+      'type': 'openProjectRequest',
+      'projectPath': '/tmp/finder.clingfyproj',
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(openedProjects, ['/tmp/finder.clingfyproj']);
+  });
+
+  test(
+    'external project preview open does not trigger recording-finalized side effects',
+    () async {
+      var finalizedCalls = 0;
+      final harness = await createHarness(
+        onRecordingFinalized: (_) async {
+          finalizedCalls += 1;
+        },
+      );
+      addTearDown(harness.dispose);
+
+      harness.bindings.bind();
+      harness.recording.openExistingProject('/tmp/finder.clingfyproj');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(harness.recording.phase, WorkflowPhase.openingPreview);
+      expect(finalizedCalls, 0);
+    },
+  );
+
+  test('external project preview failures are forwarded through HomeBindings', () async {
+    final failedProjects = <String>[];
+    final harness = await createHarness(
+      onExternalProjectOpenFailed: failedProjects.add,
+    );
+    addTearDown(harness.dispose);
+
+    harness.bindings.bind();
+    harness.recording.openExistingProject('/tmp/finder.clingfyproj');
+    final sessionId = harness.recording.sessionId!;
+
+    await _emitWorkflowEvent({
+      'type': 'previewFailed',
+      'sessionId': sessionId,
+      'reason': 'PREVIEW_ERROR',
+      'error': 'boom',
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(failedProjects, ['/tmp/finder.clingfyproj']);
+  });
 }

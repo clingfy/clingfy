@@ -542,6 +542,8 @@
   "errAssetInvalid": "فشل في تحضير معاينة الفيديو.",
   "applyEffects": "تطبيق التأثيرات",
   "recordingSaved": "تم حفظ التسجيل:",
+  "externalProjectOpenBlocked": "أنهِ التسجيل الحالي أو انتقال المعاينة قبل فتح مشروع آخر.",
+  "externalProjectOpenFailed": "تعذّر فتح مشروع Clingfy هذا.",
   "exportSuccess": "تم التصدير بنجاح:",
   "open": "فتح",
   "cursorDataMissing": "بيانات المؤشر مفقودة",
