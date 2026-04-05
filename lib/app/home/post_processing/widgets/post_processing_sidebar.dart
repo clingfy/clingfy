@@ -166,6 +166,7 @@ class PostProcessingSidebar extends StatelessWidget {
   final Function(double) onCameraZoomEmphasisStrengthChangeEnd;
   final ValueChanged<Offset> onCameraManualCenterChanged;
   final ValueChanged<Offset> onCameraManualCenterChangeEnd;
+  final ValueChanged<Offset> onCameraManualCenterSnapped;
   final Function(double) onAudioGainChanged;
   final Function(double) onAudioGainChangeEnd;
   final Function(double) onAudioVolumeChanged;
@@ -230,6 +231,7 @@ class PostProcessingSidebar extends StatelessWidget {
     required this.onCameraZoomEmphasisStrengthChangeEnd,
     required this.onCameraManualCenterChanged,
     required this.onCameraManualCenterChangeEnd,
+    required this.onCameraManualCenterSnapped,
     required this.audioGainDb,
     required this.audioVolume,
     required this.autoNormalizeOnExport,
@@ -366,6 +368,7 @@ class PostProcessingSidebar extends StatelessWidget {
         onZoomEmphasisStrengthChangeEnd: onCameraZoomEmphasisStrengthChangeEnd,
         onManualCenterChanged: onCameraManualCenterChanged,
         onManualCenterChangeEnd: onCameraManualCenterChangeEnd,
+        onManualCenterSnapped: onCameraManualCenterSnapped,
       ),
     ];
   }

@@ -151,6 +151,216 @@ final class InlinePreviewViewLayoutTests: XCTestCase {
     XCTAssertEqual(restoredTransform.ty, originalTransform.ty, accuracy: accuracy)
   }
 
+  func testCameraPreviewPlacementAnimatorInterpolatesStartMidAndEnd() throws {
+    let from = CameraPreviewPresentation(
+      frame: CGRect(x: 40, y: 60, width: 160, height: 120),
+      opacity: 0.4
+    )
+    let to = CameraPreviewPresentation(
+      frame: CGRect(x: 240, y: 180, width: 220, height: 160),
+      opacity: 0.9
+    )
+    let transition = try XCTUnwrap(
+      CameraPreviewPlacementAnimator.makeTransition(
+        mode: .placementJump,
+        from: from,
+        to: to,
+        startMediaTime: 10.0,
+        duration: 0.20
+      )
+    )
+
+    let start = CameraPreviewPlacementAnimator.resolvedPresentation(
+      target: to,
+      transition: transition,
+      now: 10.0
+    )
+    let midpoint = CameraPreviewPlacementAnimator.resolvedPresentation(
+      target: to,
+      transition: transition,
+      now: 10.10
+    )
+    let end = CameraPreviewPlacementAnimator.resolvedPresentation(
+      target: to,
+      transition: transition,
+      now: 10.20
+    )
+
+    XCTAssertEqual(start.presentation.frame.origin.x, from.frame.origin.x, accuracy: accuracy)
+    XCTAssertEqual(start.presentation.frame.origin.y, from.frame.origin.y, accuracy: accuracy)
+    XCTAssertEqual(start.presentation.opacity, from.opacity, accuracy: 0.0001)
+
+    XCTAssertEqual(midpoint.presentation.frame.origin.x, 140, accuracy: accuracy)
+    XCTAssertEqual(midpoint.presentation.frame.origin.y, 120, accuracy: accuracy)
+    XCTAssertEqual(midpoint.presentation.frame.size.width, 190, accuracy: accuracy)
+    XCTAssertEqual(midpoint.presentation.frame.size.height, 140, accuracy: accuracy)
+    XCTAssertEqual(midpoint.presentation.opacity, 0.65, accuracy: 0.0001)
+    XCTAssertFalse(midpoint.isComplete)
+
+    XCTAssertEqual(end.presentation.frame.origin.x, to.frame.origin.x, accuracy: accuracy)
+    XCTAssertEqual(end.presentation.frame.origin.y, to.frame.origin.y, accuracy: accuracy)
+    XCTAssertEqual(end.presentation.frame.size.width, to.frame.size.width, accuracy: accuracy)
+    XCTAssertEqual(end.presentation.frame.size.height, to.frame.size.height, accuracy: accuracy)
+    XCTAssertEqual(end.presentation.opacity, to.opacity, accuracy: 0.0001)
+    XCTAssertTrue(end.isComplete)
+  }
+
+  func testCameraPreviewPlacementAnimatorRetargetsFromCurrentInterpolatedPresentation() throws {
+    let first = try XCTUnwrap(
+      CameraPreviewPlacementAnimator.makeTransition(
+        mode: .placementJump,
+        from: CameraPreviewPresentation(
+          frame: CGRect(x: 20, y: 30, width: 100, height: 80),
+          opacity: 0.5
+        ),
+        to: CameraPreviewPresentation(
+          frame: CGRect(x: 220, y: 160, width: 180, height: 140),
+          opacity: 1.0
+        ),
+        startMediaTime: 5.0,
+        duration: 0.20
+      )
+    )
+    let current = CameraPreviewPlacementAnimator.currentPresentation(
+      for: first,
+      now: 5.10
+    )
+    let retarget = try XCTUnwrap(
+      CameraPreviewPlacementAnimator.makeTransition(
+        mode: .placementJump,
+        from: current,
+        to: CameraPreviewPresentation(
+          frame: CGRect(x: 360, y: 220, width: 200, height: 150),
+          opacity: 0.7
+        ),
+        startMediaTime: 5.10,
+        duration: 0.20
+      )
+    )
+
+    XCTAssertEqual(retarget.from.frame.origin.x, current.frame.origin.x, accuracy: accuracy)
+    XCTAssertEqual(retarget.from.frame.origin.y, current.frame.origin.y, accuracy: accuracy)
+    XCTAssertEqual(retarget.from.frame.size.width, current.frame.size.width, accuracy: accuracy)
+    XCTAssertEqual(retarget.from.frame.size.height, current.frame.size.height, accuracy: accuracy)
+    XCTAssertEqual(retarget.from.opacity, current.opacity, accuracy: 0.0001)
+  }
+
+  func testCameraPreviewPlacementAnimatorReduceMotionResolvesImmediately() {
+    XCTAssertEqual(
+      CameraPreviewPlacementAnimator.resolvedDuration(
+        for: .placementJump,
+        reduceMotionEnabled: true
+      ),
+      0
+    )
+    XCTAssertNil(
+      CameraPreviewPlacementAnimator.makeTransition(
+        mode: .placementJump,
+        from: CameraPreviewPresentation(
+          frame: CGRect(x: 0, y: 0, width: 80, height: 60),
+          opacity: 1.0
+        ),
+        to: CameraPreviewPresentation(
+          frame: CGRect(x: 200, y: 120, width: 120, height: 90),
+          opacity: 0.6
+        ),
+        startMediaTime: 0,
+        duration: CameraPreviewPlacementAnimator.resolvedDuration(
+          for: .placementJump,
+          reduceMotionEnabled: true
+        )
+      )
+    )
+  }
+
+  func testCameraPreviewPlacementAnimatorUsesShorterDurationForDragPreview() {
+    XCTAssertEqual(
+      CameraPreviewPlacementAnimator.resolvedDuration(
+        for: .placementJump,
+        reduceMotionEnabled: false
+      ),
+      0.20
+    )
+    XCTAssertEqual(
+      CameraPreviewPlacementAnimator.resolvedDuration(
+        for: .dragPreview,
+        reduceMotionEnabled: false
+      ),
+      0.08
+    )
+  }
+
+  func testCameraPlacementPreviewUpdateKeepsCompositionAndRetargetsTransition() throws {
+    let view = InlinePreviewView(
+      viewIdentifier: 1,
+      arguments: nil,
+      messenger: nil
+    )
+    let initialCameraParams = makeCameraParams(
+      normalizedCanvasCenter: CGPoint(x: 0.22, y: 0.74)
+    )
+    let initialScene = PreviewScene(
+      mediaSources: PreviewMediaSources(
+        projectPath: "/tmp/project.clingfyproj",
+        screenPath: "/tmp/screen.mov",
+        cameraPath: "/tmp/camera.mov",
+        metadataPath: nil,
+        cursorPath: nil,
+        zoomManualPath: nil
+      ),
+      screenParams: makeParams(),
+      cameraParams: initialCameraParams
+    )
+
+    view._testSeedCameraPlacementPreviewState(scene: initialScene)
+
+    let originalCompositionParams = try XCTUnwrap(
+      view._testCurrentCompositionParams()
+    )
+    var previewCameraParams = initialCameraParams
+    previewCameraParams.normalizedCanvasCenter = CGPoint(x: 0.58, y: 0.36)
+
+    view.updateCameraPlacementPreview(
+      cameraParams: previewCameraParams,
+      changeKind: .dragPreview
+    )
+
+    XCTAssertEqual(
+      view._testCurrentCompositionParams(),
+      originalCompositionParams
+    )
+    XCTAssertEqual(
+      view._testCurrentScene()?.screenParams,
+      initialScene.screenParams
+    )
+    XCTAssertEqual(
+      view._testCurrentScene()?.cameraParams,
+      previewCameraParams
+    )
+    XCTAssertEqual(
+      view._testCurrentCameraCompositionParams(),
+      previewCameraParams
+    )
+    XCTAssertEqual(
+      view._testCurrentCameraPreviewTransitionMode(),
+      .dragPreview
+    )
+
+    view.updateCameraPlacementPreview(
+      cameraParams: previewCameraParams,
+      changeKind: .placementJump
+    )
+
+    XCTAssertEqual(
+      view._testCurrentCompositionParams(),
+      originalCompositionParams
+    )
+    XCTAssertEqual(
+      view._testCurrentCameraPreviewTransitionMode(),
+      .placementJump
+    )
+  }
+
   private func makeParams(
     targetSize: CGSize = CGSize(width: 1920, height: 1080),
     padding: Double = 0,
@@ -199,6 +409,29 @@ final class InlinePreviewViewLayoutTests: XCTestCase {
       renderScale: renderScale,
       fps: fps,
       maxLongEdge: maxLongEdge
+    )
+  }
+
+  private func makeCameraParams(
+    normalizedCanvasCenter: CGPoint? = CGPoint(x: 0.18, y: 0.82)
+  ) -> CameraCompositionParams {
+    CameraCompositionParams(
+      visible: true,
+      layoutPreset: .overlayBottomLeft,
+      normalizedCanvasCenter: normalizedCanvasCenter,
+      sizeFactor: 0.22,
+      shape: .circle,
+      cornerRadius: 0.0,
+      opacity: 1.0,
+      mirror: true,
+      contentMode: .fill,
+      zoomBehavior: .fixed,
+      borderWidth: 0.0,
+      borderColorArgb: nil,
+      shadowPreset: 0,
+      chromaKeyEnabled: false,
+      chromaKeyStrength: 0.4,
+      chromaKeyColorArgb: nil
     )
   }
 }

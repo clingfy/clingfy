@@ -41,6 +41,7 @@ class PostCameraSection extends StatelessWidget {
     required this.onZoomEmphasisStrengthChangeEnd,
     required this.onManualCenterChanged,
     required this.onManualCenterChangeEnd,
+    required this.onManualCenterSnapped,
   });
 
   final bool hasCameraAsset;
@@ -69,6 +70,7 @@ class PostCameraSection extends StatelessWidget {
   final ValueChanged<double> onZoomEmphasisStrengthChangeEnd;
   final ValueChanged<Offset> onManualCenterChanged;
   final ValueChanged<Offset> onManualCenterChangeEnd;
+  final ValueChanged<Offset> onManualCenterSnapped;
 
   @override
   Widget build(BuildContext context) {
@@ -129,6 +131,7 @@ class PostCameraSection extends StatelessWidget {
             onPresetSelected: onLayoutPresetChanged,
             onManualCenterChanged: onManualCenterChanged,
             onManualCenterChangeEnd: onManualCenterChangeEnd,
+            onManualCenterSnapped: onManualCenterSnapped,
           ),
         ),
       ],
@@ -489,12 +492,14 @@ class _CameraPositionPanel extends StatefulWidget {
     required this.onPresetSelected,
     required this.onManualCenterChanged,
     required this.onManualCenterChangeEnd,
+    required this.onManualCenterSnapped,
   });
 
   final CameraCompositionState camera;
   final ValueChanged<CameraLayoutPreset> onPresetSelected;
   final ValueChanged<Offset> onManualCenterChanged;
   final ValueChanged<Offset> onManualCenterChangeEnd;
+  final ValueChanged<Offset> onManualCenterSnapped;
 
   @override
   State<_CameraPositionPanel> createState() => _CameraPositionPanelState();
@@ -780,8 +785,7 @@ class _CameraPositionPanelState extends State<_CameraPositionPanel> {
       _dragNormalizedCenter = snappedCenter;
     });
 
-    widget.onManualCenterChanged(snappedCenter);
-    widget.onManualCenterChangeEnd(snappedCenter);
+    widget.onManualCenterSnapped(snappedCenter);
   }
 
   bool _isPresetSelected(_CameraPositionPreset preset) {

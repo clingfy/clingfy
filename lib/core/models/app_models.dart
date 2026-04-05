@@ -108,6 +108,8 @@ enum CameraContentMode {
   }
 }
 
+enum CameraPreviewChangeKind { none, placementJump, dragPreview }
+
 class CameraCompositionState {
   static const double defaultZoomScaleMultiplier = 0.35;
   static const int defaultIntroDurationMs = 220;
@@ -504,9 +506,7 @@ class RecordingWorkflowState {
     return RecordingWorkflowState(
       phase: phase ?? this.phase,
       sessionId: clearSessionId ? null : (sessionId ?? this.sessionId),
-      projectPath: clearProjectPath
-          ? null
-          : (projectPath ?? this.projectPath),
+      projectPath: clearProjectPath ? null : (projectPath ?? this.projectPath),
       previewPath: clearPreviewPath ? null : (previewPath ?? this.previewPath),
       previewToken: clearPreviewToken
           ? null

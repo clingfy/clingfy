@@ -660,6 +660,9 @@ class MainFlutterWindow: NSWindow {
           let cursorSize = (args["cursorSize"] as? Double) ?? 1.0
           let zoomFactor = (args["zoomFactor"] as? Double) ?? 1.5
           let showCursor = (args["showCursor"] as? Bool) ?? true
+          let cameraPreviewChangeKind = CameraPreviewChangeKind(
+            rawValue: (args["cameraPreviewChangeKind"] as? String) ?? CameraPreviewChangeKind.none.rawValue
+          ) ?? .none
 
           let format = (args["format"] as? String) ?? "mov"
           let codec = (args["codec"] as? String) ?? "hevc"
@@ -684,6 +687,7 @@ class MainFlutterWindow: NSWindow {
             audioGainDb: (args["audioGainDb"] as? Double) ?? 0.0,
             audioVolumePercent: (args["audioVolumePercent"] as? Double) ?? 100.0,
             zoomSegments: zoomSegments,
+            cameraPreviewChangeKind: cameraPreviewChangeKind,
             sessionId: args["sessionId"] as? String,
             cameraPath: args["cameraPath"] as? String,
             cameraParams: cameraParams,
@@ -692,6 +696,29 @@ class MainFlutterWindow: NSWindow {
           result(
             FlutterError(
               code: NativeErrorCode.badArgs, message: "Missing projectPath/width/height", details: nil))
+        }
+
+      case "previewSetCameraPlacement":
+        if let args = call.arguments as? [String: Any],
+          let projectPath = args["projectPath"] as? String
+        {
+          let cameraParams = self.screenRecorder.resolveCameraCompositionParams(
+            projectPath: projectPath,
+            args: args
+          )
+          let cameraPreviewChangeKind = CameraPreviewChangeKind(
+            rawValue: (args["cameraPreviewChangeKind"] as? String) ?? CameraPreviewChangeKind.none.rawValue
+          ) ?? .none
+          self.screenRecorder.previewSetCameraPlacement(
+            sessionId: args["sessionId"] as? String,
+            cameraPreviewChangeKind: cameraPreviewChangeKind,
+            cameraParams: cameraParams,
+            result: result
+          )
+        } else {
+          result(
+            FlutterError(
+              code: NativeErrorCode.badArgs, message: "Missing projectPath", details: nil))
         }
 
       case "previewSetAudioMix":

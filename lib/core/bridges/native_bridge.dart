@@ -357,6 +357,22 @@ class NativeBridge {
     });
   }
 
+  Future<void> previewSetCameraPlacement({
+    required String projectPath,
+    required CameraPreviewChangeKind changeKind,
+    required String? sessionId,
+    required String? cameraPath,
+    required CameraCompositionState? cameraState,
+  }) async {
+    await _nativeBridge.invokeMethod<void>('previewSetCameraPlacement', {
+      'projectPath': projectPath,
+      if (sessionId != null) 'sessionId': sessionId,
+      if (cameraPath != null) 'cameraPath': cameraPath,
+      'cameraPreviewChangeKind': changeKind.name,
+      ...?cameraState?.toMap(),
+    });
+  }
+
   Future<List<ZoomSegment>> getZoomSegments(String videoPath) async {
     try {
       final List? results = await _nativeBridge.invokeMethod<List>(
@@ -392,13 +408,11 @@ class NativeBridge {
     List<ZoomSegment> segments,
   ) async {
     try {
-      final bool? success = await _nativeBridge.invokeMethod<bool>(
-        'saveManualZoomSegments',
-        {
-          'projectPath': videoPath,
-          'segments': segments.map((s) => s.toMap()).toList(),
-        },
-      );
+      final bool? success = await _nativeBridge
+          .invokeMethod<bool>('saveManualZoomSegments', {
+            'projectPath': videoPath,
+            'segments': segments.map((s) => s.toMap()).toList(),
+          });
       return success ?? false;
     } catch (e) {
       Log.e("NativeBridge", "saveManualZoomSegments failed: $e");
@@ -475,7 +489,10 @@ class NativeBridge {
       {'projectPath': projectPath},
     );
     if (raw == null) {
-      return RecordingSceneInfo(projectPath: projectPath, screenPath: projectPath);
+      return RecordingSceneInfo(
+        projectPath: projectPath,
+        screenPath: projectPath,
+      );
     }
     return RecordingSceneInfo.fromMap(raw);
   }

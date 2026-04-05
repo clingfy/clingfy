@@ -46,6 +46,7 @@ void main() {
     void Function(CameraLayoutPreset)? onCameraLayoutPresetChanged,
     void Function(Offset)? onCameraManualCenterChanged,
     void Function(Offset)? onCameraManualCenterChangeEnd,
+    void Function(Offset)? onCameraManualCenterSnapped,
     void Function(String?)? onBackgroundImageChanged,
   }) {
     final sidebar = PostProcessingSidebar(
@@ -112,6 +113,7 @@ void main() {
       onCameraZoomEmphasisStrengthChangeEnd: (_) {},
       onCameraManualCenterChanged: onCameraManualCenterChanged ?? (_) {},
       onCameraManualCenterChangeEnd: onCameraManualCenterChangeEnd ?? (_) {},
+      onCameraManualCenterSnapped: onCameraManualCenterSnapped ?? (_) {},
       onAudioGainChanged: (_) {},
       onAudioGainChangeEnd: (_) {},
       onAudioVolumeChanged: (_) {},
@@ -436,9 +438,10 @@ void main() {
     expect(selectedPreset, CameraLayoutPreset.overlayTopLeft);
   });
 
-  testWidgets('camera position panel edge snaps emit manual callbacks', (
+  testWidgets('camera position panel edge snaps emit snapped callbacks only', (
     tester,
   ) async {
+    final snappedCenters = <Offset>[];
     final changedCenters = <Offset>[];
     final endedCenters = <Offset>[];
     CameraLayoutPreset? selectedPreset;
@@ -462,6 +465,7 @@ void main() {
           layoutPreset: CameraLayoutPreset.overlayBottomRight,
         ),
         onCameraLayoutPresetChanged: (preset) => selectedPreset = preset,
+        onCameraManualCenterSnapped: snappedCenters.add,
         onCameraManualCenterChanged: changedCenters.add,
         onCameraManualCenterChangeEnd: endedCenters.add,
       ),
@@ -474,9 +478,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(selectedPreset, isNull);
-    expectSingleCenter(changedCenters, dx: 0.5, dy: 0.14);
-    expectSingleCenter(endedCenters, dx: 0.5, dy: 0.14);
+    expectSingleCenter(snappedCenters, dx: 0.5, dy: 0.14);
+    expect(changedCenters, isEmpty);
+    expect(endedCenters, isEmpty);
 
+    snappedCenters.clear();
     changedCenters.clear();
     endedCenters.clear();
 
@@ -485,9 +491,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(selectedPreset, isNull);
-    expectSingleCenter(changedCenters, dx: 0.07, dy: 0.5);
-    expectSingleCenter(endedCenters, dx: 0.07, dy: 0.5);
+    expectSingleCenter(snappedCenters, dx: 0.07, dy: 0.5);
+    expect(changedCenters, isEmpty);
+    expect(endedCenters, isEmpty);
 
+    snappedCenters.clear();
     changedCenters.clear();
     endedCenters.clear();
 
@@ -496,9 +504,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(selectedPreset, isNull);
-    expectSingleCenter(changedCenters, dx: 0.93, dy: 0.5);
-    expectSingleCenter(endedCenters, dx: 0.93, dy: 0.5);
+    expectSingleCenter(snappedCenters, dx: 0.93, dy: 0.5);
+    expect(changedCenters, isEmpty);
+    expect(endedCenters, isEmpty);
 
+    snappedCenters.clear();
     changedCenters.clear();
     endedCenters.clear();
 
@@ -507,8 +517,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(selectedPreset, isNull);
-    expectSingleCenter(changedCenters, dx: 0.5, dy: 0.86);
-    expectSingleCenter(endedCenters, dx: 0.5, dy: 0.86);
+    expectSingleCenter(snappedCenters, dx: 0.5, dy: 0.86);
+    expect(changedCenters, isEmpty);
+    expect(endedCenters, isEmpty);
   });
 
   testWidgets('camera position panel drag emits manual center callbacks', (

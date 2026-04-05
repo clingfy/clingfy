@@ -2014,17 +2014,24 @@ final class ScreenRecorderFacade: NSObject {
     }
     let seededParams = metadata.map { cameraCompositionParams(from: $0.editorSeed) }
     let resolved = explicitCameraCompositionParams(from: args ?? [:], fallback: seededParams)
+    var context: [String: Any] = [
+      "projectPath": projectPath,
+      "hasSeed": seededParams != nil,
+      "hasExplicitArgs": args.map(anyCameraParamOverride(in:)) ?? false,
+      "cameraPreviewChangeKind":
+        (args?["cameraPreviewChangeKind"] as? String) ?? CameraPreviewChangeKind.none.rawValue,
+      "visible": resolved?.visible ?? false,
+      "layoutPreset": resolved?.layoutPreset.rawValue ?? "nil",
+    ]
+    if let center = resolved?.normalizedCanvasCenter {
+      context["normalizedCenterX"] = center.x
+      context["normalizedCenterY"] = center.y
+    }
 
     NativeLogger.d(
       "Scene",
       "Resolved camera composition params",
-      context: [
-        "projectPath": projectPath,
-        "hasSeed": seededParams != nil,
-        "hasExplicitArgs": args.map(anyCameraParamOverride(in:)) ?? false,
-        "visible": resolved?.visible ?? false,
-        "layoutPreset": resolved?.layoutPreset.rawValue ?? "nil",
-      ]
+      context: context
     )
 
     return resolved
@@ -2081,6 +2088,7 @@ final class ScreenRecorderFacade: NSObject {
     audioGainDb: Double,
     audioVolumePercent: Double,
     zoomSegments: [ZoomTimelineSegment]?,
+    cameraPreviewChangeKind: CameraPreviewChangeKind,
     sessionId: String?,
     cameraPath: String?,
     cameraParams: CameraCompositionParams?,
@@ -2147,12 +2155,16 @@ final class ScreenRecorderFacade: NSObject {
         "fit": fit,
         "targetSize": "\(targetSize.width)x\(targetSize.height)",
         "zoomSegments": zoomSegments.map { "\($0.count)" } ?? "nil",
+        "cameraPreviewChangeKind": cameraPreviewChangeKind.rawValue,
+        "cameraNormalizedCenterX": cameraParams?.normalizedCanvasCenter?.x ?? "nil",
+        "cameraNormalizedCenterY": cameraParams?.normalizedCanvasCenter?.y ?? "nil",
       ])
 
     let previewScene = PreviewScene(
       mediaSources: mediaSources,
       screenParams: params,
-      cameraParams: cameraParams
+      cameraParams: cameraParams,
+      cameraPreviewChangeKind: cameraPreviewChangeKind
     )
 
     DispatchQueue.main.async {
@@ -2167,6 +2179,31 @@ final class ScreenRecorderFacade: NSObject {
       }
     }
     result(projectPath)
+  }
+
+  func previewSetCameraPlacement(
+    sessionId: String?,
+    cameraPreviewChangeKind: CameraPreviewChangeKind,
+    cameraParams: CameraCompositionParams?,
+    result: @escaping FlutterResult
+  ) {
+    if let view = inlinePreviewViewInstance {
+      if let sessionId, view.currentSessionId != sessionId {
+        result(nil)
+        return
+      }
+      view.updateCameraPlacementPreview(
+        cameraParams: cameraParams,
+        changeKind: cameraPreviewChangeKind
+      )
+    } else if let sessionId,
+      let request = pendingPreviewOpenRequest,
+      request.sessionId != sessionId
+    {
+      result(nil)
+      return
+    }
+    result(nil)
   }
 
   func previewSetAudioGainDb(audioGainDb: Double, result: @escaping FlutterResult) {

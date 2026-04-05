@@ -10,6 +10,136 @@ import Cocoa
 import FlutterMacOS
 import Foundation
 
+struct CameraPreviewPresentation: Equatable {
+  let frame: CGRect
+  let opacity: Float
+}
+
+enum CameraPreviewTransitionMode: String, Equatable {
+  case placementJump
+  case dragPreview
+}
+
+struct CameraPreviewTransitionState: Equatable {
+  let mode: CameraPreviewTransitionMode
+  let from: CameraPreviewPresentation
+  let to: CameraPreviewPresentation
+  let startMediaTime: CFTimeInterval
+  let duration: CFTimeInterval
+}
+
+enum CameraPreviewPlacementAnimator {
+  static let placementJumpDuration: CFTimeInterval = 0.20
+  static let dragPreviewDuration: CFTimeInterval = 0.08
+  private static let frameEpsilon: CGFloat = 0.5
+  private static let opacityEpsilon: Float = 0.01
+
+  static func resolvedDuration(
+    for mode: CameraPreviewTransitionMode,
+    reduceMotionEnabled: Bool
+  ) -> CFTimeInterval {
+    guard !reduceMotionEnabled else { return 0.0 }
+    switch mode {
+    case .placementJump:
+      return placementJumpDuration
+    case .dragPreview:
+      return dragPreviewDuration
+    }
+  }
+
+  static func makeTransition(
+    mode: CameraPreviewTransitionMode,
+    from: CameraPreviewPresentation,
+    to: CameraPreviewPresentation,
+    startMediaTime: CFTimeInterval,
+    duration: CFTimeInterval
+  ) -> CameraPreviewTransitionState? {
+    guard duration > 0 else { return nil }
+    guard isMeaningfullyDifferent(from: from, to: to) else { return nil }
+    return CameraPreviewTransitionState(
+      mode: mode,
+      from: from,
+      to: to,
+      startMediaTime: startMediaTime,
+      duration: duration
+    )
+  }
+
+  static func currentPresentation(
+    for transition: CameraPreviewTransitionState,
+    now: CFTimeInterval
+  ) -> CameraPreviewPresentation {
+    let progress = easedProgress(progress(now: now, transition: transition))
+    return interpolate(from: transition.from, to: transition.to, progress: progress)
+  }
+
+  static func resolvedPresentation(
+    target: CameraPreviewPresentation,
+    transition: CameraPreviewTransitionState?,
+    now: CFTimeInterval
+  ) -> (presentation: CameraPreviewPresentation, isComplete: Bool) {
+    guard let transition else {
+      return (target, true)
+    }
+
+    let rawProgress = progress(now: now, transition: transition)
+    let presentation = interpolate(
+      from: transition.from,
+      to: target,
+      progress: easedProgress(rawProgress)
+    )
+    return (presentation, rawProgress >= 1.0)
+  }
+
+  private static func progress(
+    now: CFTimeInterval,
+    transition: CameraPreviewTransitionState
+  ) -> Double {
+    guard transition.duration > 0 else { return 1.0 }
+    let normalized = (now - transition.startMediaTime) / transition.duration
+    return min(max(normalized, 0.0), 1.0)
+  }
+
+  private static func interpolate(
+    from: CameraPreviewPresentation,
+    to: CameraPreviewPresentation,
+    progress: Double
+  ) -> CameraPreviewPresentation {
+    CameraPreviewPresentation(
+      frame: CGRect(
+        x: lerp(from.frame.origin.x, to.frame.origin.x, progress),
+        y: lerp(from.frame.origin.y, to.frame.origin.y, progress),
+        width: lerp(from.frame.size.width, to.frame.size.width, progress),
+        height: lerp(from.frame.size.height, to.frame.size.height, progress)
+      ),
+      opacity: lerp(from.opacity, to.opacity, progress)
+    )
+  }
+
+  private static func isMeaningfullyDifferent(
+    from: CameraPreviewPresentation,
+    to: CameraPreviewPresentation
+  ) -> Bool {
+    abs(from.frame.origin.x - to.frame.origin.x) > frameEpsilon
+      || abs(from.frame.origin.y - to.frame.origin.y) > frameEpsilon
+      || abs(from.frame.size.width - to.frame.size.width) > frameEpsilon
+      || abs(from.frame.size.height - to.frame.size.height) > frameEpsilon
+      || abs(from.opacity - to.opacity) > opacityEpsilon
+  }
+
+  private static func easedProgress(_ t: Double) -> Double {
+    t * t * (3.0 - (2.0 * t))
+  }
+
+  private static func lerp(_ start: CGFloat, _ end: CGFloat, _ progress: Double) -> CGFloat {
+    start + ((end - start) * CGFloat(progress))
+  }
+
+  private static func lerp(_ start: Float, _ end: Float, _ progress: Double) -> Float {
+    start + ((end - start) * Float(progress))
+  }
+}
+
 final class InlinePreviewView: NSView {
   private struct PreviewTickState {
     let time: Double
@@ -55,6 +185,7 @@ final class InlinePreviewView: NSView {
 
   // Retry state for cursor loading
   private var cursorRetryTimer: Timer?
+  private var cameraPreviewTransitionTimer: Timer?
   private var cursorRetryCount = 0
   private let maxCursorRetries = 5
 
@@ -259,6 +390,7 @@ final class InlinePreviewView: NSView {
     }
 
     let frame = cameraContainerLayer.frame
+    cancelCameraPreviewPlacementTransition()
     cameraDragState = CameraDragState(
       pointerOffsetFromCenter: CGPoint(
         x: canvasPoint.x - frame.midX,
@@ -289,8 +421,10 @@ final class InlinePreviewView: NSView {
       x: center.x / canvasSize.width,
       y: center.y / canvasSize.height
     )
-    currentCameraCompositionParams = params
-    updateCameraPreviewLayout()
+    updateCameraPlacementPreview(
+      cameraParams: params,
+      changeKind: .dragPreview
+    )
     return true
   }
 
@@ -298,6 +432,10 @@ final class InlinePreviewView: NSView {
     guard cameraDragState != nil else { return false }
     defer { cameraDragState = nil }
     _ = updateCameraDrag(with: event)
+    updateCameraPlacementPreview(
+      cameraParams: currentCameraCompositionParams,
+      changeKind: .placementJump
+    )
 
     guard let normalizedCenter = currentCameraCompositionParams?.normalizedCanvasCenter else {
       return true
@@ -383,6 +521,7 @@ final class InlinePreviewView: NSView {
     scheduleCompositionUpdate(
       params: params,
       cameraParams: currentCameraCompositionParams,
+      cameraPreviewChangeKind: .none,
       reason: "boundsChanged",
       forceImmediate: false
     )
@@ -424,6 +563,7 @@ final class InlinePreviewView: NSView {
     guard let cameraPlayer else { return }
 
     guard let cameraPath, FileManager.default.fileExists(atPath: cameraPath) else {
+      cancelCameraPreviewPlacementTransition()
       cameraPlayer.pause()
       cameraPlayer.replaceCurrentItem(with: nil)
       cameraContainerLayer?.isHidden = true
@@ -467,8 +607,10 @@ final class InlinePreviewView: NSView {
     pendingCameraCompositionParams = nil
     currentCompositionParams = nil
     currentCameraCompositionParams = nil
+    pendingCameraPreviewChangeKind = .none
     currentLayout = nil
     currentPreviewProfile = nil
+    cancelCameraPreviewPlacementTransition()
     setPreviewContentVisible(false)
 
     NativeLogger.i(
@@ -819,7 +961,9 @@ final class InlinePreviewView: NSView {
     pendingCompositionParams = nil
     currentCameraCompositionParams = nil
     pendingCameraCompositionParams = nil
+    pendingCameraPreviewChangeKind = .none
     pendingZoomSegments = nil
+    cancelCameraPreviewPlacementTransition()
 
     cursorLayer?.removeFromSuperlayer()
     cursorLayer = nil
@@ -1013,6 +1157,7 @@ final class InlinePreviewView: NSView {
         scheduleCompositionUpdate(
           params: params,
           cameraParams: pendingCameraCompositionParams ?? currentCameraCompositionParams,
+          cameraPreviewChangeKind: .none,
           reason: "previewReady",
           forceImmediate: true,
           onApplied: { [weak self] success in
@@ -1220,7 +1365,9 @@ final class InlinePreviewView: NSView {
   private var currentLayout: CompositionBuilder.PreviewCompositionResult?
   private var pendingCompositionParams: CompositionParams?
   private var pendingCameraCompositionParams: CameraCompositionParams?
+  private var pendingCameraPreviewChangeKind: CameraPreviewChangeKind = .none
   private var pendingZoomSegments: [ZoomTimelineSegment]?
+  private var cameraPreviewTransitionState: CameraPreviewTransitionState?
 
   private(set) var currentVideoPath: String?
 
@@ -1236,23 +1383,65 @@ final class InlinePreviewView: NSView {
 
     updateComposition(
       params: scene.screenParams,
-      cameraParams: scene.cameraParams
+      cameraParams: scene.cameraParams,
+      cameraPreviewChangeKind: scene.cameraPreviewChangeKind
     )
   }
 
-  func updateComposition(params: CompositionParams, cameraParams: CameraCompositionParams? = nil) {
+  func updateComposition(
+    params: CompositionParams,
+    cameraParams: CameraCompositionParams? = nil,
+    cameraPreviewChangeKind: CameraPreviewChangeKind = .none
+  ) {
     scheduleCompositionUpdate(
       params: params,
       cameraParams: cameraParams,
+      cameraPreviewChangeKind: cameraPreviewChangeKind,
       reason: "externalUpdate",
       forceImmediate: false,
       onApplied: nil
     )
   }
 
+  func updateCameraPlacementPreview(
+    cameraParams: CameraCompositionParams?,
+    changeKind: CameraPreviewChangeKind
+  ) {
+    let resolvedCameraParams = cameraParams ?? currentCameraCompositionParams
+    currentCameraCompositionParams = resolvedCameraParams
+    pendingCameraCompositionParams = resolvedCameraParams
+
+    if let scene = currentScene {
+      currentScene = PreviewScene(
+        mediaSources: scene.mediaSources,
+        screenParams: scene.screenParams,
+        cameraParams: resolvedCameraParams,
+        cameraPreviewChangeKind: changeKind
+      )
+    } else if
+      let mediaSources = currentMediaSources,
+      let screenParams = currentCompositionParams
+    {
+      currentScene = PreviewScene(
+        mediaSources: mediaSources,
+        screenParams: screenParams,
+        cameraParams: resolvedCameraParams,
+        cameraPreviewChangeKind: changeKind
+      )
+    }
+
+    applyCameraPreviewChangeKind(
+      changeKind,
+      currentTime: player?.currentTime().seconds ?? 0,
+      screenZoom: smoothZoom
+    )
+    updateCameraPreviewLayout()
+  }
+
   private func scheduleCompositionUpdate(
     params: CompositionParams,
     cameraParams: CameraCompositionParams?,
+    cameraPreviewChangeKind: CameraPreviewChangeKind,
     reason: String,
     forceImmediate: Bool,
     onApplied: ((Bool) -> Void)? = nil
@@ -1263,17 +1452,20 @@ final class InlinePreviewView: NSView {
         "reason": reason,
         "currentPath": currentVideoPath ?? "nil",
         "hasAsset": player?.currentItem?.asset != nil,
+        "cameraPreviewChangeKind": cameraPreviewChangeKind.rawValue,
       ])
 
     guard let asset = player?.currentItem?.asset else {
       NativeLogger.d("Player", "No asset yet, storing params as pending")
       pendingCompositionParams = params
       pendingCameraCompositionParams = cameraParams
+      pendingCameraPreviewChangeKind = cameraPreviewChangeKind
       return
     }
     let mergedParams = paramsApplyingPendingZoomSegments(into: params)
     pendingCompositionParams = mergedParams
     pendingCameraCompositionParams = cameraParams
+    pendingCameraPreviewChangeKind = cameraPreviewChangeKind
 
     let newProfile = makePreviewProfile(for: mergedParams)
 
@@ -1296,6 +1488,7 @@ final class InlinePreviewView: NSView {
         applyLightweightPreviewUpdate(
           to: mergedParams,
           cameraParams: cameraParams,
+          changeKind: cameraPreviewChangeKind,
           updatePlan: updatePlan,
           profile: newProfile,
           onApplied: onApplied
@@ -1311,6 +1504,7 @@ final class InlinePreviewView: NSView {
       applyCompositionNow(
         params: mergedParams,
         cameraParams: cameraParams,
+        cameraPreviewChangeKind: cameraPreviewChangeKind,
         profile: newProfile,
         asset: asset,
         reason: reason,
@@ -1329,10 +1523,12 @@ final class InlinePreviewView: NSView {
 
       let latestParams = self.pendingCompositionParams ?? mergedParams
       let latestCameraParams = self.pendingCameraCompositionParams ?? cameraParams
+      let latestCameraPreviewChangeKind = self.pendingCameraPreviewChangeKind
       let latestProfile = self.makePreviewProfile(for: latestParams)
       self.applyCompositionNow(
         params: latestParams,
         cameraParams: latestCameraParams,
+        cameraPreviewChangeKind: latestCameraPreviewChangeKind,
         profile: latestProfile,
         asset: latestAsset,
         reason: "debounced:\(reason)",
@@ -1358,12 +1554,14 @@ final class InlinePreviewView: NSView {
   private func applyLightweightPreviewUpdate(
     to newParams: CompositionParams,
     cameraParams: CameraCompositionParams?,
+    changeKind: CameraPreviewChangeKind,
     updatePlan: PreviewUpdatePlan,
     profile: PreviewProfile,
     onApplied: ((Bool) -> Void)? = nil
   ) {
     currentCompositionParams = newParams
     currentCameraCompositionParams = cameraParams ?? currentCameraCompositionParams
+    pendingCameraPreviewChangeKind = .none
     if let mediaSources = currentMediaSources {
       currentScene = PreviewScene(
         mediaSources: mediaSources,
@@ -1372,6 +1570,11 @@ final class InlinePreviewView: NSView {
       )
     }
     currentPreviewProfile = profile
+    applyCameraPreviewChangeKind(
+      changeKind,
+      currentTime: player?.currentTime().seconds ?? 0,
+      screenZoom: smoothZoom
+    )
 
     if updatePlan.refreshCanvasGeometry {
       updateContainerLayout()
@@ -1405,12 +1608,14 @@ final class InlinePreviewView: NSView {
   private func applyCompositionNow(
     params: CompositionParams,
     cameraParams: CameraCompositionParams?,
+    cameraPreviewChangeKind: CameraPreviewChangeKind,
     profile: PreviewProfile,
     asset: AVAsset,
     reason: String,
     onApplied: ((Bool) -> Void)? = nil
   ) {
     pendingCompositionWorkItem = nil
+    pendingCameraPreviewChangeKind = .none
 
     let currentTime = player?.currentTime() ?? .zero
     let wasPlaying = (player?.rate ?? 0) != 0
@@ -1519,6 +1724,7 @@ final class InlinePreviewView: NSView {
     )
     currentLayout = layout
     currentPreviewProfile = profile
+    cancelCameraPreviewPlacementTransition()
     pendingCompositionParams = nil
     pendingCameraCompositionParams = nil
 
@@ -1578,6 +1784,7 @@ final class InlinePreviewView: NSView {
       currentMediaSources?.cameraPath != nil,
       cameraPlayer?.currentItem != nil
     else {
+      cancelCameraPreviewPlacementTransition()
       cameraContainerLayer.isHidden = true
       return
     }
@@ -1596,22 +1803,181 @@ final class InlinePreviewView: NSView {
     )
   }
 
-  private func updateCameraPreviewGeometry(time: Double, screenZoom: CGFloat) {
-    guard
-      let canvasSize = currentCompositionParams?.targetSize,
-      let cameraContainerLayer,
-      let cameraPlayerLayer
-    else {
+  private func cameraPreviewTransitionDuration(
+    for mode: CameraPreviewTransitionMode
+  ) -> CFTimeInterval {
+    CameraPreviewPlacementAnimator.resolvedDuration(
+      for: mode,
+      reduceMotionEnabled: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    )
+  }
+
+  private func applyCameraPreviewChangeKind(
+    _ changeKind: CameraPreviewChangeKind,
+    currentTime: Double,
+    screenZoom: CGFloat
+  ) {
+    guard let mode = transitionMode(for: changeKind) else { return }
+    let transitionResult = startCameraPreviewPlacementTransition(
+      mode: mode,
+      currentTime: currentTime,
+      screenZoom: screenZoom
+    )
+
+    var context: [String: Any] = [
+      "cameraPreviewChangeKind": changeKind.rawValue,
+      "transitionMode": mode.rawValue,
+      "transitionAction": transitionResult.action,
+      "transitionDuration": transitionResult.duration,
+    ]
+    if let center = currentCameraCompositionParams?.normalizedCanvasCenter {
+      context["normalizedCenterX"] = center.x
+      context["normalizedCenterY"] = center.y
+    }
+
+    NativeLogger.d(
+      "Player",
+      "Applied camera preview transition",
+      context: context
+    )
+  }
+
+  private func transitionMode(
+    for changeKind: CameraPreviewChangeKind
+  ) -> CameraPreviewTransitionMode? {
+    switch changeKind {
+    case .none:
+      return nil
+    case .placementJump:
+      return .placementJump
+    case .dragPreview:
+      return .dragPreview
+    }
+  }
+
+  @discardableResult
+  private func startCameraPreviewPlacementTransition(
+    mode: CameraPreviewTransitionMode,
+    currentTime: Double,
+    screenZoom: CGFloat
+  ) -> (action: String, duration: CFTimeInterval) {
+    guard let resolvedTarget = resolveTargetCameraPreviewPresentation(
+      time: currentTime,
+      screenZoom: screenZoom
+    ) else {
+      cancelCameraPreviewPlacementTransition()
+      return ("missingTarget", 0)
+    }
+
+    let duration = cameraPreviewTransitionDuration(for: mode)
+    guard duration > 0 else {
+      cancelCameraPreviewPlacementTransition()
+      return ("reducedMotion", duration)
+    }
+
+    let now = CACurrentMediaTime()
+    let currentPresentation =
+      currentCameraPreviewPresentation(now: now)
+      ?? resolvedTarget.target
+    let previousTransition = cameraPreviewTransitionState
+    guard let transition = CameraPreviewPlacementAnimator.makeTransition(
+      mode: mode,
+      from: currentPresentation,
+      to: resolvedTarget.target,
+      startMediaTime: now,
+      duration: duration
+    ) else {
+      cancelCameraPreviewPlacementTransition()
+      return ("skippedNoChange", duration)
+    }
+
+    cameraPreviewTransitionState = transition
+    startCameraPreviewTransitionTimerIfNeeded()
+    let action =
+      previousTransition == nil
+      ? "started"
+      : previousTransition?.mode == mode
+      ? "retargeted"
+      : "restarted"
+    return (action, duration)
+  }
+
+  private func currentCameraPreviewPresentation(
+    now: CFTimeInterval
+  ) -> CameraPreviewPresentation? {
+    if let transition = cameraPreviewTransitionState {
+      return CameraPreviewPlacementAnimator.currentPresentation(
+        for: transition,
+        now: now
+      )
+    }
+
+    guard let cameraContainerLayer else {
+      return nil
+    }
+
+    return CameraPreviewPresentation(
+      frame: cameraContainerLayer.frame,
+      opacity: cameraContainerLayer.opacity
+    )
+  }
+
+  private func startCameraPreviewTransitionTimerIfNeeded() {
+    guard cameraPreviewTransitionState != nil else { return }
+    if cameraPreviewTransitionTimer != nil { return }
+
+    let timer = Timer(
+      timeInterval: 1.0 / 60.0,
+      target: self,
+      selector: #selector(handleCameraPreviewTransitionTimer(_:)),
+      userInfo: nil,
+      repeats: true
+    )
+    cameraPreviewTransitionTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func stopCameraPreviewTransitionTimer() {
+    cameraPreviewTransitionTimer?.invalidate()
+    cameraPreviewTransitionTimer = nil
+  }
+
+  @objc private func handleCameraPreviewTransitionTimer(_ timer: Timer) {
+    guard cameraPreviewTransitionState != nil else {
+      stopCameraPreviewTransitionTimer()
       return
     }
 
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    updateCameraPreviewGeometry(
+      time: player?.currentTime().seconds ?? 0,
+      screenZoom: smoothZoom
+    )
+    CATransaction.commit()
+  }
+
+  private func cancelCameraPreviewPlacementTransition() {
+    cameraPreviewTransitionState = nil
+    stopCameraPreviewTransitionTimer()
+  }
+
+  private func resolveTargetCameraPreviewPresentation(
+    time: Double,
+    screenZoom: CGFloat
+  ) -> (
+    params: CameraCompositionParams,
+    baseResolution: CameraLayoutResolution,
+    animated: CameraAnimationResolution,
+    target: CameraPreviewPresentation
+  )? {
     guard
+      let canvasSize = currentCompositionParams?.targetSize,
       let params = currentCameraCompositionParams,
       currentMediaSources?.cameraPath != nil,
       cameraPlayer?.currentItem != nil
     else {
-      cameraContainerLayer.isHidden = true
-      return
+      return nil
     }
 
     let baseResolution = CameraLayoutResolver.effectiveFrame(
@@ -1619,8 +1985,7 @@ final class InlinePreviewView: NSView {
       params: params
     )
     guard baseResolution.shouldRender else {
-      cameraContainerLayer.isHidden = true
-      return
+      return nil
     }
 
     let animated = CameraAnimationTimelineBuilder.resolvePresentation(
@@ -1632,6 +1997,37 @@ final class InlinePreviewView: NSView {
       totalDuration: player?.currentItem?.duration.seconds ?? 0,
       zoomState: resolvedCameraAnimationZoomState(time: time)
     )
+
+    return (
+      params: params,
+      baseResolution: baseResolution,
+      animated: animated,
+      target: CameraPreviewPresentation(
+        frame: animated.frame.integral,
+        opacity: Float(max(0.0, min(1.0, animated.opacity)))
+      )
+    )
+  }
+
+  private func updateCameraPreviewGeometry(time: Double, screenZoom: CGFloat) {
+    guard
+      let cameraContainerLayer,
+      let cameraPlayerLayer
+    else {
+      return
+    }
+
+    guard let resolvedTarget = resolveTargetCameraPreviewPresentation(
+      time: time,
+      screenZoom: screenZoom
+    ) else {
+      cancelCameraPreviewPlacementTransition()
+      cameraContainerLayer.isHidden = true
+      return
+    }
+    let params = resolvedTarget.params
+    let baseResolution = resolvedTarget.baseResolution
+    let animated = resolvedTarget.animated
 
     if CameraPlacementDebug.shouldLogPreview(tick: debugTick) {
       var context: [String: Any] = [
@@ -1663,10 +2059,20 @@ final class InlinePreviewView: NSView {
       )
     }
 
-    let frame = animated.frame.integral
+    let resolvedPresentation = CameraPreviewPlacementAnimator.resolvedPresentation(
+      target: resolvedTarget.target,
+      transition: cameraPreviewTransitionState,
+      now: CACurrentMediaTime()
+    )
+    if cameraPreviewTransitionState != nil && resolvedPresentation.isComplete {
+      cameraPreviewTransitionState = nil
+      stopCameraPreviewTransitionTimer()
+    }
+
+    let frame = resolvedPresentation.presentation.frame
     cameraContainerLayer.isHidden = false
     cameraContainerLayer.frame = frame
-    cameraContainerLayer.opacity = Float(max(0.0, min(1.0, animated.opacity)))
+    cameraContainerLayer.opacity = resolvedPresentation.presentation.opacity
 
     let bounds = CGRect(origin: .zero, size: frame.size)
     cameraPlayerLayer.frame = bounds
@@ -2271,6 +2677,32 @@ final class InlinePreviewView: NSView {
         "masked": "\(maskedContentLayer?.frame ?? .zero)",
         "player": "\(playerLayer?.frame ?? .zero)",
       ])
+  }
+
+  func _testSeedCameraPlacementPreviewState(scene: PreviewScene) {
+    currentScene = scene
+    currentMediaSources = scene.mediaSources
+    currentCompositionParams = scene.screenParams
+    currentCameraCompositionParams = scene.cameraParams
+    pendingCompositionParams = nil
+    pendingCameraCompositionParams = nil
+    cameraPlayer?.replaceCurrentItem(with: AVPlayerItem(asset: AVMutableComposition()))
+  }
+
+  func _testCurrentScene() -> PreviewScene? {
+    currentScene
+  }
+
+  func _testCurrentCompositionParams() -> CompositionParams? {
+    currentCompositionParams
+  }
+
+  func _testCurrentCameraCompositionParams() -> CameraCompositionParams? {
+    currentCameraCompositionParams
+  }
+
+  func _testCurrentCameraPreviewTransitionMode() -> CameraPreviewTransitionMode? {
+    cameraPreviewTransitionState?.mode
   }
 
 }

@@ -10,6 +10,12 @@ struct PreviewMediaSources: Equatable {
   let zoomManualPath: String?
 }
 
+enum CameraPreviewChangeKind: String, Equatable {
+  case none
+  case placementJump
+  case dragPreview
+}
+
 struct CameraCompositionParams: Equatable {
   static let defaultZoomScaleMultiplier = 0.35
   static let defaultIntroDurationMs = 220
@@ -71,6 +77,19 @@ struct PreviewScene: Equatable {
   let mediaSources: PreviewMediaSources
   let screenParams: CompositionParams
   let cameraParams: CameraCompositionParams?
+  let cameraPreviewChangeKind: CameraPreviewChangeKind
+
+  init(
+    mediaSources: PreviewMediaSources,
+    screenParams: CompositionParams,
+    cameraParams: CameraCompositionParams?,
+    cameraPreviewChangeKind: CameraPreviewChangeKind = .none
+  ) {
+    self.mediaSources = mediaSources
+    self.screenParams = screenParams
+    self.cameraParams = cameraParams
+    self.cameraPreviewChangeKind = cameraPreviewChangeKind
+  }
 }
 
 struct CameraLayoutResolution: Equatable {

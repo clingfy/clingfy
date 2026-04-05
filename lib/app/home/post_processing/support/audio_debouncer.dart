@@ -26,4 +26,57 @@ class ActionDebouncer {
   }
 }
 
+class ActionThrottler {
+  final Duration interval;
+
+  Timer? _timer;
+  VoidCallback? _pendingAction;
+  DateTime? _lastRunAt;
+
+  ActionThrottler({this.interval = const Duration(milliseconds: 16)});
+
+  void run(VoidCallback action) {
+    final now = DateTime.now();
+    final lastRunAt = _lastRunAt;
+    if (lastRunAt == null || now.difference(lastRunAt) >= interval) {
+      _timer?.cancel();
+      _timer = null;
+      _pendingAction = null;
+      _lastRunAt = now;
+      action();
+      return;
+    }
+
+    _pendingAction = action;
+    if (_timer != null) {
+      return;
+    }
+
+    final remaining = interval - now.difference(lastRunAt);
+    _timer = Timer(remaining, _flushPending);
+  }
+
+  void cancel() {
+    _timer?.cancel();
+    _timer = null;
+    _pendingAction = null;
+  }
+
+  void dispose() {
+    cancel();
+  }
+
+  void _flushPending() {
+    _timer = null;
+    final action = _pendingAction;
+    _pendingAction = null;
+    if (action == null) {
+      return;
+    }
+
+    _lastRunAt = DateTime.now();
+    action();
+  }
+}
+
 typedef AudioDebouncer = ActionDebouncer;

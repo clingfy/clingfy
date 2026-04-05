@@ -158,6 +158,7 @@ class PostProcessingSidebarContainer extends StatelessWidget {
               onCameraManualCenterChanged: post.setCameraManualCenterPreview,
               onCameraManualCenterChangeEnd:
                   post.setCameraManualCenterPreviewEnd,
+              onCameraManualCenterSnapped: post.setCameraManualCenterSnap,
               onAutoNormalizeOnExportChanged:
                   settingsController.post.updatePostAutoNormalizeEnabled,
               onAutoNormalizeTargetDbfsChanged:

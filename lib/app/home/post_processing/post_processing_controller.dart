@@ -44,7 +44,7 @@ class PostProcessingController extends ChangeNotifier {
     _warningSub?.cancel();
     _cameraManualPositionSub?.cancel();
     _audioPreviewDebouncer.dispose();
-    _cameraManualPreviewDebouncer.dispose();
+    _cameraManualPreviewThrottler.dispose();
     super.dispose();
   }
 
@@ -107,9 +107,9 @@ class PostProcessingController extends ChangeNotifier {
   final AudioDebouncer _audioPreviewDebouncer = AudioDebouncer(
     delay: Duration(milliseconds: 150),
   );
-  final ActionDebouncer _cameraManualPreviewDebouncer = ActionDebouncer(
-    delay: Duration(milliseconds: 75),
-  );
+  final ActionThrottler _cameraManualPreviewThrottler = ActionThrottler();
+  CameraPreviewChangeKind _pendingCameraPreviewChangeKind =
+      CameraPreviewChangeKind.none;
 
   // --- Getters ---
   bool get processing => _isProcessingPreview;
@@ -212,6 +212,7 @@ class PostProcessingController extends ChangeNotifier {
       layoutPreset: preset,
       clearNormalizedCanvasCenter: true,
     );
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
     notifyListeners();
     applyProcessing();
   }
@@ -338,20 +339,36 @@ class PostProcessingController extends ChangeNotifier {
   }
 
   void resetCameraManualPosition() {
-    _cameraManualPreviewDebouncer.cancel();
+    _cameraManualPreviewThrottler.cancel();
     final current = _cameraState ?? const CameraCompositionState.hidden();
     _cameraState = current.copyWith(clearNormalizedCanvasCenter: true);
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
     notifyListeners();
     applyProcessing();
   }
 
   void setCameraManualCenter(Offset? center) {
-    _cameraManualPreviewDebouncer.cancel();
+    _cameraManualPreviewThrottler.cancel();
     final current = _cameraState ?? const CameraCompositionState.hidden();
     _cameraState = current.copyWith(
       normalizedCanvasCenter: center,
       clearNormalizedCanvasCenter: center == null,
     );
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
+    notifyListeners();
+    applyProcessing();
+  }
+
+  void setCameraManualCenterSnap(Offset center) {
+    _cameraManualPreviewThrottler.cancel();
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(
+      normalizedCanvasCenter: Offset(
+        center.dx.clamp(0.0, 1.0),
+        (1.0 - center.dy).clamp(0.0, 1.0),
+      ),
+    );
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
     notifyListeners();
     applyProcessing();
   }
@@ -361,20 +378,32 @@ class PostProcessingController extends ChangeNotifier {
     _cameraState = current.copyWith(
       normalizedCanvasCenter: Offset(
         center.dx.clamp(0.0, 1.0),
-        (1.0 - center.dy).clamp(0.0, 1.0), // Invert: Flutter top-down -> native bottom-up
+        (1.0 - center.dy).clamp(
+          0.0,
+          1.0,
+        ), // Invert: Flutter top-down -> native bottom-up
       ),
     );
     notifyListeners();
-    _cameraManualPreviewDebouncer.run(() {
-      unawaited(applyProcessing());
+    _cameraManualPreviewThrottler.run(() {
+      unawaited(
+        _pushPreviewCameraPlacement(CameraPreviewChangeKind.dragPreview),
+      );
     });
   }
 
   void setCameraManualCenterPreviewEnd(Offset center) {
-    _cameraManualPreviewDebouncer.cancel();
-    setCameraManualCenter(
-      Offset(center.dx.clamp(0.0, 1.0), (1.0 - center.dy).clamp(0.0, 1.0)), // Invert: Flutter top-down -> native bottom-up
+    _cameraManualPreviewThrottler.cancel();
+    final current = _cameraState ?? const CameraCompositionState.hidden();
+    _cameraState = current.copyWith(
+      normalizedCanvasCenter: Offset(
+        center.dx.clamp(0.0, 1.0),
+        (1.0 - center.dy).clamp(0.0, 1.0),
+      ),
     );
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
+    notifyListeners();
+    applyProcessing();
   }
 
   void setCameraManualCenterX(double x) {
@@ -388,6 +417,7 @@ class PostProcessingController extends ChangeNotifier {
 
   void setCameraManualCenterXEnd(double x) {
     setCameraManualCenterX(x);
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
     applyProcessing();
   }
 
@@ -402,6 +432,7 @@ class PostProcessingController extends ChangeNotifier {
 
   void setCameraManualCenterYEnd(double y) {
     setCameraManualCenterY(y);
+    _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.placementJump;
     applyProcessing();
   }
 
@@ -450,6 +481,47 @@ class PostProcessingController extends ChangeNotifier {
             Log.e("PostProcessing", "Failed to update audio preview", e, st);
           }),
     );
+  }
+
+  Map<String, dynamic>? _cameraPreviewMethodArgs(
+    CameraPreviewChangeKind changeKind,
+  ) {
+    if (_projectPath == null) {
+      return null;
+    }
+
+    return {
+      'cameraPreviewChangeKind': changeKind.name,
+      if (_cameraPath != null) 'cameraPath': _cameraPath,
+      ...?_cameraState?.toMap(),
+    };
+  }
+
+  Future<void> _pushPreviewCameraPlacement(
+    CameraPreviewChangeKind changeKind,
+  ) async {
+    final projectPath = _projectPath;
+    final args = _cameraPreviewMethodArgs(changeKind);
+    if (projectPath == null || args == null) {
+      return;
+    }
+
+    try {
+      await _nativeBridge.previewSetCameraPlacement(
+        projectPath: projectPath,
+        changeKind: changeKind,
+        sessionId: _activeSessionId,
+        cameraPath: args['cameraPath'] as String?,
+        cameraState: _cameraState,
+      );
+    } catch (e, st) {
+      Log.e(
+        "PostProcessing",
+        "Failed to update preview camera placement",
+        e,
+        st,
+      );
+    }
   }
 
   // --- Actions ---
@@ -533,6 +605,12 @@ class PostProcessingController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final cameraPreviewChangeKind = _pendingCameraPreviewChangeKind;
+      _pendingCameraPreviewChangeKind = CameraPreviewChangeKind.none;
+      final cameraPreviewArgs = _cameraPreviewMethodArgs(
+        cameraPreviewChangeKind,
+      );
+
       Map<String, dynamic> args = {
         'layoutPreset': _settings.post.layoutPreset.name,
         'resolutionPreset': _settings.post.resolutionPreset.name,
@@ -552,8 +630,7 @@ class PostProcessingController extends ChangeNotifier {
         'format': 'mov',
         'codec': 'hevc',
         'bitrate': 'auto',
-        if (_cameraPath != null) 'cameraPath': _cameraPath,
-        ...?_cameraState?.toMap(),
+        ...?cameraPreviewArgs,
       };
 
       final zoomSegments = _player.previewCompositionZoomSegments;
