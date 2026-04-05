@@ -1,6 +1,15 @@
 import Foundation
 
 enum ProjectOpenValidator {
+  static func isOpenableStatus(_ status: RecordingProjectStatus) -> Bool {
+    switch status {
+    case .ready, .cancelled, .failed:
+      return true
+    case .capturing, .finalizing, .deleted:
+      return false
+    }
+  }
+
   static func validateProjectURL(
     _ url: URL,
     fileManager: FileManager = .default
@@ -34,13 +43,19 @@ enum ProjectOpenValidator {
     fileManager: FileManager = .default
   ) throws -> RecordingProjectRef {
     let projectRef = try RecordingProjectRef.open(projectRoot: projectRoot)
-    let missingFiles = missingRequiredReadyProjectFiles(
+    guard isOpenableStatus(projectRef.manifest.status) else {
+      throw RecordingProjectManifestError.projectStatusNotOpenable(
+        projectRef.manifest.status
+      )
+    }
+
+    let missingFiles = missingRequiredProjectFiles(
       for: projectRef.manifest,
       projectRootURL: projectRef.rootURL,
       fileManager: fileManager
     )
 
-    if projectRef.manifest.status == .ready && !missingFiles.isEmpty {
+    if !missingFiles.isEmpty {
       throw RecordingProjectManifestError.missingRequiredProjectFiles(
         missingFiles.map(\.path)
       )
@@ -49,7 +64,7 @@ enum ProjectOpenValidator {
     return projectRef
   }
 
-  static func missingRequiredReadyProjectFiles(
+  static func missingRequiredProjectFiles(
     for manifest: RecordingProjectManifest,
     projectRootURL: URL,
     fileManager: FileManager = .default

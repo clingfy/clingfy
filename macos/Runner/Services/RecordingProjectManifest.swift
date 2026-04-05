@@ -13,6 +13,7 @@ enum RecordingProjectManifestError: LocalizedError {
   case invalidProjectDirectory(String)
   case projectDirectoryMismatch(expectedProjectID: String, actualProjectID: String)
   case unsupportedSchemaVersion(Int)
+  case projectStatusNotOpenable(RecordingProjectStatus)
   case missingRequiredProjectFiles([String])
 
   var errorDescription: String? {
@@ -24,6 +25,8 @@ enum RecordingProjectManifestError: LocalizedError {
         "Recording project directory mismatch: expected \(expectedProjectID), got \(actualProjectID)"
     case .unsupportedSchemaVersion(let version):
       return "Unsupported recording project schema version \(version)"
+    case .projectStatusNotOpenable(let status):
+      return "Recording project status is not openable: \(status.rawValue)"
     case .missingRequiredProjectFiles(let paths):
       return "Recording project is missing required files: \(paths.joined(separator: ", "))"
     }

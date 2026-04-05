@@ -168,6 +168,51 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     }
   }
 
+  func testProjectOpenValidatorAcceptsCancelledAndFailedProjectsWithDurableFiles() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    for status in [RecordingProjectStatus.cancelled, .failed] {
+      let projectId = "rec_\(status.rawValue)"
+      let projectRoot = rootURL.appendingPathComponent(
+        RecordingProjectPaths.projectDirectoryName(for: projectId),
+        isDirectory: true
+      )
+      try createProjectSkeleton(at: projectRoot, projectId: projectId)
+      try writeReadyMetadataFiles(to: projectRoot)
+      try updateProjectStatus(at: projectRoot, status: status)
+
+      let projectRef = try ProjectOpenValidator.validateProjectURL(projectRoot)
+      XCTAssertEqual(projectRef.projectId, projectId)
+      XCTAssertEqual(projectRef.manifest.status, status)
+    }
+  }
+
+  func testProjectOpenValidatorRejectsNonOpenableStatuses() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    for status in [RecordingProjectStatus.capturing, .finalizing, .deleted] {
+      let projectId = "rec_\(status.rawValue)"
+      let projectRoot = rootURL.appendingPathComponent(
+        RecordingProjectPaths.projectDirectoryName(for: projectId),
+        isDirectory: true
+      )
+      try createProjectSkeleton(at: projectRoot, projectId: projectId)
+      try writeReadyMetadataFiles(to: projectRoot)
+      try updateProjectStatus(at: projectRoot, status: status)
+
+      XCTAssertThrowsError(try ProjectOpenValidator.validateProjectURL(projectRoot)) { error in
+        guard case RecordingProjectManifestError.projectStatusNotOpenable(let rejectedStatus) =
+          error
+        else {
+          return XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(rejectedStatus, status)
+      }
+    }
+  }
+
   func testProjectOpenCoordinatorQueuesBeforeSinkAttachAndFlushesInOrder() {
     let coordinator = ProjectOpenCoordinator()
     var receivedEvents = [[String: Any]]()
@@ -302,6 +347,8 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     )
 
     try createProjectSkeleton(at: validRoot, projectId: "rec_valid")
+    try writeReadyMetadataFiles(to: validRoot)
+    try markProjectReady(at: validRoot)
     try FileManager.default.createDirectory(at: corruptRoot, withIntermediateDirectories: true)
     try Data("not-json".utf8).write(
       to: RecordingProjectPaths.manifestURL(for: corruptRoot)
@@ -410,6 +457,33 @@ final class RecordingFailureRecoveryTests: XCTestCase {
     )
     XCTAssertEqual(updated.status, .failed)
     XCTAssertTrue(store.listRecordings().isEmpty)
+  }
+
+  func testRecordingStoreListsOnlyOpenableProjectsWithDurableFiles() throws {
+    let rootURL = makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+
+    let openableStatuses: [RecordingProjectStatus] = [.ready, .cancelled, .failed]
+    let rejectedStatuses: [RecordingProjectStatus] = [.capturing, .finalizing, .deleted]
+
+    for status in openableStatuses + rejectedStatuses {
+      let projectId = "rec_\(status.rawValue)"
+      let projectRoot = rootURL.appendingPathComponent(
+        RecordingProjectPaths.projectDirectoryName(for: projectId),
+        isDirectory: true
+      )
+      try createProjectSkeleton(at: projectRoot, projectId: projectId)
+      try writeReadyMetadataFiles(to: projectRoot)
+      try updateProjectStatus(at: projectRoot, status: status)
+    }
+
+    let store = RecordingStore(rootURL: rootURL, fileManager: .default)
+    let listedProjectIds = Set(store.listRecordings().compactMap { $0.manifest?.projectId })
+
+    XCTAssertEqual(
+      listedProjectIds,
+      Set(openableStatuses.map { "rec_\($0.rawValue)" })
+    )
   }
 
   func testDisplayNameUpdatesDoNotRenameProjectDirectory() throws {
@@ -804,9 +878,13 @@ final class RecordingFailureRecoveryTests: XCTestCase {
   }
 
   private func markProjectReady(at projectRoot: URL) throws {
+    try updateProjectStatus(at: projectRoot, status: .ready)
+  }
+
+  private func updateProjectStatus(at projectRoot: URL, status: RecordingProjectStatus) throws {
     let manifestURL = RecordingProjectPaths.manifestURL(for: projectRoot)
     var manifest = try RecordingProjectManifest.read(from: manifestURL)
-    manifest.updateStatus(.ready)
+    manifest.updateStatus(status)
     try manifest.write(to: manifestURL)
   }
 }

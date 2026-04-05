@@ -34,20 +34,31 @@ final class RecordingStore {
 
   func listRecordings() -> [RecordingInfo] {
     return projectDirectories()
-      .compactMap { projectRootURL in
+      .compactMap { projectRootURL -> RecordingInfo? in
         guard let manifestEntry = loadManifestEntry(for: projectRootURL) else {
           return nil
         }
 
-        if shouldSkipFromListing(
-          manifest: manifestEntry.manifest,
-          projectRootURL: projectRootURL
-        ) {
-          let missingFiles = ProjectOpenValidator.missingRequiredReadyProjectFiles(
-            for: manifestEntry.manifest,
-            projectRootURL: projectRootURL,
-            fileManager: fm
-          )
+        if !ProjectOpenValidator.isOpenableStatus(manifestEntry.manifest.status) {
+          if shouldLogInvalidProjects {
+            NativeLogger.w(
+              "RecordingStore",
+              "Skipping recording project with non-openable status",
+              context: [
+                "path": projectRootURL.path,
+                "status": manifestEntry.manifest.status.rawValue,
+              ]
+            )
+          }
+          return nil
+        }
+
+        let missingFiles = ProjectOpenValidator.missingRequiredProjectFiles(
+          for: manifestEntry.manifest,
+          projectRootURL: projectRootURL,
+          fileManager: fm
+        )
+        if !missingFiles.isEmpty {
           if shouldLogInvalidProjects {
             NativeLogger.w(
               "RecordingStore",
@@ -174,8 +185,8 @@ final class RecordingStore {
   @discardableResult
   func deleteAll() -> Int {
     var deletedCount = 0
-    for recording in listRecordings() {
-      if deleteProject(projectRootURL: recording.projectRootURL) {
+    for projectRootURL in projectDirectories() {
+      if deleteProject(projectRootURL: projectRootURL) {
         deletedCount += 1
       }
     }
@@ -236,7 +247,7 @@ final class RecordingStore {
       var manifest = manifestEntry.manifest
       guard manifest.status == .ready else { continue }
 
-      let missingFiles = missingRequiredReadyProjectFiles(
+      let missingFiles = missingRequiredProjectFiles(
         for: manifest,
         projectRootURL: projectRootURL
       )
@@ -333,20 +344,11 @@ final class RecordingStore {
     }
   }
 
-  private func shouldSkipFromListing(
-    manifest: RecordingProjectManifest,
-    projectRootURL: URL
-  ) -> Bool {
-    let missingFiles = missingRequiredReadyProjectFiles(for: manifest, projectRootURL: projectRootURL)
-    guard !missingFiles.isEmpty else { return false }
-    return manifest.status == .ready || manifest.status == .failed
-  }
-
-  private func missingRequiredReadyProjectFiles(
+  private func missingRequiredProjectFiles(
     for manifest: RecordingProjectManifest,
     projectRootURL: URL
   ) -> [URL] {
-    ProjectOpenValidator.missingRequiredReadyProjectFiles(
+    ProjectOpenValidator.missingRequiredProjectFiles(
       for: manifest,
       projectRootURL: projectRootURL,
       fileManager: fm
